@@ -13,8 +13,8 @@ Tiêu chí tiên quyết: **Tối ưu chi phí (100% miễn phí / mã nguồn m
 * **Tải Video**: `yt-dlp` (hỗ trợ TikTok/Douyin không watermark)
 * **Speech-to-Text (STT)**: `faster-whisper` (sử dụng model `base` hoặc `small`, cấu hình chạy CPU với chế độ lượng tử hóa `compute_type="int8"`)
 * **Mô hình Ngôn ngữ (LLM)**:
-  * **Endpoint**: `https://llm.vnptsi.vn/v1` (OpenAI compatible)
-  * **Model**: `google/gemma-4-26B-A4B-it` (Mô hình Mixture-of-Experts 26B tổng / 4B active)
+  * **Endpoint**: Hỗ trợ chuẩn OpenAI-compatible (cấu hình qua `LLM_BASE_URL`, có thể dùng Ollama local `http://localhost:11434/v1`, hoặc custom gateway).
+  * **Model**: Mô hình ngôn ngữ mở tối ưu (ví dụ: `gemma3:4b`, `gemma-4-26B-A4B-it`, `gpt-4o-mini`).
   * **Mục đích**: Dịch thoát ý, tối ưu độ dài câu thoại phù hợp với nhịp độ video ngắn, ngắt dòng phụ đề chuẩn xác.
 * **Text-to-Speech (TTS)**: `edge-tts` (Microsoft Edge Neural Voice)
   * Giọng Nam: `vi-VN-NamMinhNeural`
@@ -30,7 +30,7 @@ Tiêu chí tiên quyết: **Tối ưu chi phí (100% miễn phí / mã nguồn m
 
 ```
 auto-sub-video/
-├── .env.example              # Mẫu biến môi trường (VNPT_API_KEY, VNPT_LLM_URL,...)
+├── .env.example              # Mẫu biến môi trường (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY,...)
 ├── requirements.txt          # Danh sách thư viện Python
 ├── config.py                 # Quản lý cấu hình tập trung (Pydantic / Dataclass)
 ├── core/
@@ -38,7 +38,7 @@ auto-sub-video/
 │   ├── downloader.py         # Module tải video TikTok không watermark (yt-dlp)
 │   ├── audio_extractor.py    # Module tách audio từ video sang định dạng WAV 16kHz
 │   ├── transcriber.py        # Module STT nhận diện câu thoại & timestamp (faster-whisper)
-│   ├── translator.py         # Module dịch thuật & chuẩn hóa qua VNPT Gemma LLM
+│   ├── translator.py         # Module dịch thuật & chuẩn hóa qua LLM (OpenAI-compatible)
 │   ├── tts_engine.py         # Module sinh giọng đọc tiếng Việt & căn chỉnh tốc độ (edge-tts + atempo)
 │   └── audio_mixer.py        # Module hòa âm (ducking audio gốc + lồng tiếng) & xuất video (FFmpeg)
 ├── pipeline.py               # Điều phối toàn bộ luồng xử lý từ URL -> Video kết quả

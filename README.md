@@ -43,11 +43,11 @@ Tạo file `.env` từ `.env.example`:
 ```bash
 cp .env.example .env
 ```
-Mở file `.env` và điền cấu hình API của VNPT SI:
+Mở file `.env` và điền cấu hình API của mô hình ngôn ngữ (chuẩn OpenAI-compatible, hỗ trợ Ollama local hoặc bất kỳ gateway nào):
 ```env
-VNPT_LLM_URL=https://llm.vnptsi.vn/v1
-VNPT_LLM_MODEL=google/gemma-4-26B-A4B-it
-VNPT_API_KEY=your_api_key_here
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=gemma3:4b
+LLM_API_KEY=your_api_key_here
 ```
 
 ### 3. Khởi chạy ứng dụng
