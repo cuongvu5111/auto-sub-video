@@ -198,6 +198,8 @@ class MainWindow(QMainWindow):
         # Group ② Original Subtitles
         grp_source = QGroupBox("② Original Subtitle")
         layout_source = QGridLayout(grp_source)
+        layout_source.setVerticalSpacing(8)
+        layout_source.setHorizontalSpacing(10)
         layout_source.addWidget(QLabel("Mode:"), 0, 0)
         self.cbo_mode = QComboBox()
         self.cbo_mode.addItems(["Auto — detect hardcoded subtitles", "Always run STT (Whisper)"])
@@ -212,11 +214,14 @@ class MainWindow(QMainWindow):
         # Group ③ Translation
         grp_trans = QGroupBox("③ Translation")
         layout_trans = QGridLayout(grp_trans)
+        layout_trans.setVerticalSpacing(8)
+        layout_trans.setHorizontalSpacing(10)
         layout_trans.addWidget(QLabel("Translate With:"), 0, 0)
         h_model = QHBoxLayout()
         self.txt_model = QLineEdit(Config.LLM_MODEL)
         self.txt_model.setReadOnly(True)
         self.btn_change_model = QPushButton("Change...")
+        self.btn_change_model.setFixedHeight(30)
         self.btn_change_model.clicked.connect(self.action_change_model)
         h_model.addWidget(self.txt_model)
         h_model.addWidget(self.btn_change_model)
@@ -252,6 +257,8 @@ class MainWindow(QMainWindow):
         # Group ④ Dubbing
         grp_tts = QGroupBox("④ Dubbing")
         layout_tts = QGridLayout(grp_tts)
+        layout_tts.setVerticalSpacing(8)
+        layout_tts.setHorizontalSpacing(10)
         layout_tts.addWidget(QLabel("Voice:"), 0, 0)
         self.cbo_voice = QComboBox()
         for label, voice_key in Config.AVAILABLE_VOICES.items():
@@ -276,6 +283,7 @@ class MainWindow(QMainWindow):
         self.txt_clone = QLineEdit()
         self.txt_clone.setPlaceholderText("(Optional) Select reference audio...")
         self.btn_browse_clone = QPushButton("📁")
+        self.btn_browse_clone.setFixedSize(36, 30)
         h_clone.addWidget(self.txt_clone)
         h_clone.addWidget(self.btn_browse_clone)
         layout_tts.addLayout(h_clone, 3, 1)
@@ -284,6 +292,8 @@ class MainWindow(QMainWindow):
         # Group ⑤ Export
         grp_export = QGroupBox("⑤ Export")
         layout_export = QGridLayout(grp_export)
+        layout_export.setVerticalSpacing(8)
+        layout_export.setHorizontalSpacing(10)
 
         h_sub_opts = QHBoxLayout()
         self.chk_burn_sub = QCheckBox("Burn translated subtitles into video")
@@ -320,6 +330,7 @@ class MainWindow(QMainWindow):
         h_out = QHBoxLayout()
         self.txt_output_dir = QLineEdit(str(Config.OUTPUT_DIR))
         self.btn_browse_out = QPushButton("Browse...")
+        self.btn_browse_out.setFixedHeight(30)
         self.btn_browse_out.clicked.connect(self.action_browse_output_dir)
         h_out.addWidget(self.txt_output_dir)
         h_out.addWidget(self.btn_browse_out)
@@ -434,7 +445,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid #CBD5E1;
                 border-radius: 6px;
                 margin-top: 10px;
-                padding-top: 14px;
+                padding-top: 18px;
                 background-color: #FFFFFF;
                 color: #0F172A;
             }
@@ -472,6 +483,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid #CBD5E1;
                 border-radius: 4px;
                 padding: 5px 12px;
+                min-height: 24px;
                 font-size: 12px;
                 font-weight: 500;
             }
@@ -490,18 +502,37 @@ class MainWindow(QMainWindow):
             }
             QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox {
                 border: 1px solid #CBD5E1;
-                border-radius: 4px;
-                padding: 4px 8px;
+                border-radius: 5px;
+                padding: 4px 10px;
+                min-height: 28px;
                 background-color: #FFFFFF;
                 color: #0F172A;
-                font-size: 12px;
+                font-size: 13px;
             }
             QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus {
                 border-color: #2563EB;
+                background-color: #FFFFFF;
             }
             QComboBox::drop-down {
-                border: none;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 24px;
+                border-left: 1px solid #CBD5E1;
+                border-top-right-radius: 5px;
+                border-bottom-right-radius: 5px;
+            }
+            QDoubleSpinBox::up-button, QSpinBox::up-button {
+                subcontrol-origin: border;
+                subcontrol-position: top right;
                 width: 20px;
+                border-left: 1px solid #CBD5E1;
+                border-bottom: 1px solid #CBD5E1;
+            }
+            QDoubleSpinBox::down-button, QSpinBox::down-button {
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 20px;
+                border-left: 1px solid #CBD5E1;
             }
             QComboBox QAbstractItemView {
                 background-color: #FFFFFF;
@@ -509,6 +540,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid #CBD5E1;
                 selection-background-color: #E0F2FE;
                 selection-color: #0F172A;
+                padding: 4px;
             }
             QTableWidget {
                 background-color: #FFFFFF;
