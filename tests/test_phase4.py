@@ -51,9 +51,46 @@ def test_prompt_builder():
     print("✓ test_prompt_builder: PASSED")
 
 
+def test_llm_config_persistence():
+    """Kiểm tra lưu cấu hình LLM vào tệp .env."""
+    from config import Config
+    orig_url = Config.LLM_BASE_URL
+    orig_key = Config.LLM_API_KEY
+    orig_model = Config.LLM_MODEL
+
+    try:
+        Config.save_llm_config("https://api.test.com/v1", "test-key-123", "test-model-456")
+        assert Config.LLM_BASE_URL == "https://api.test.com/v1"
+        assert Config.LLM_API_KEY == "test-key-123"
+        assert Config.LLM_MODEL == "test-model-456"
+
+        env_file = Config.BASE_DIR / ".env"
+        assert env_file.exists()
+        content = env_file.read_text(encoding="utf-8")
+        assert "LLM_BASE_URL=https://api.test.com/v1" in content
+        assert "LLM_API_KEY=test-key-123" in content
+        assert "LLM_MODEL=test-model-456" in content
+        print("✓ test_llm_config_persistence: PASSED")
+    finally:
+        Config.save_llm_config(orig_url, orig_key, orig_model)
+
+
+def test_llm_connection_validation():
+    """Kiểm tra validation khi tham số rỗng hoặc không hợp lệ."""
+    from core.translator import test_llm_connection
+    ok, msg = test_llm_connection("", "key", "model")
+    assert not ok and "Base URL cannot be empty" in msg
+
+    ok, msg = test_llm_connection("http://localhost:11434/v1", "key", "")
+    assert not ok and "Model name cannot be empty" in msg
+    print("✓ test_llm_connection_validation: PASSED")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 4 ===")
     test_clean_json_response()
     test_empty_segments()
     test_prompt_builder()
+    test_llm_config_persistence()
+    test_llm_connection_validation()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 4 ĐÃ VƯỢT QUA ===")

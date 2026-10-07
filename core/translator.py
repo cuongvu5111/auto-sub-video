@@ -183,3 +183,52 @@ def translate_segments(
         progress_callback(f"Translation completed: {len(enriched_segments)} dialogues ready for dubbing.", 100.0)
 
     return enriched_segments
+
+
+def test_llm_connection(base_url: str, api_key: str, model: str) -> tuple[bool, str]:
+    """
+    Kiểm tra kết nối và tính khả dụng của mô hình LLM với một yêu cầu ping ngắn.
+    Trả về: (thành_công: bool, thông_điệp: str)
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return False, "Library 'openai' is not installed."
+
+    base_url = base_url.strip()
+    if base_url.endswith("/chat/completions"):
+        base_url = base_url[:-len("/chat/completions")]
+
+    api_key = api_key.strip() or "EMPTY"
+    model = model.strip()
+
+    if not base_url:
+        return False, "Base URL cannot be empty."
+    if not model:
+        return False, "Model name cannot be empty."
+
+    try:
+        client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=8.0,
+            max_retries=1
+        )
+        # Gửi ping test siêu ngắn
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=5
+        )
+        if response and response.choices:
+            return True, f"✓ Connected successfully to {model}!"
+        return False, "Model returned an empty response."
+    except Exception as e:
+        err_msg = str(e)
+        if "AuthenticationError" in err_msg or "401" in err_msg:
+            return False, "Authentication failed (401): Invalid API Key."
+        elif "NotFoundError" in err_msg or "404" in err_msg:
+            return False, f"Model '{model}' not found (404) or invalid endpoint URL."
+        elif "ConnectionError" in err_msg or "ConnectError" in err_msg:
+            return False, "Failed to connect to host. Check your Base URL or network."
+        return False, f"Connection error: {err_msg[:80]}"

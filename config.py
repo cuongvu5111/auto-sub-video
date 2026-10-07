@@ -84,6 +84,53 @@ class Config:
         cls.TEMP_DIR.mkdir(parents=True, exist_ok=True)
         cls.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    @classmethod
+    def save_llm_config(cls, base_url: str, api_key: str, model: str) -> None:
+        """
+        Lưu cấu hình LLM vào tệp .env và cập nhật biến trong runtime Config.
+        """
+        base_url = base_url.strip()
+        if base_url.endswith("/chat/completions"):
+            base_url = base_url[:-len("/chat/completions")]
+
+        cls.LLM_BASE_URL = base_url
+        cls.LLM_API_KEY = api_key.strip()
+        cls.LLM_MODEL = model.strip()
+
+        os.environ["LLM_BASE_URL"] = cls.LLM_BASE_URL
+        os.environ["LLM_API_KEY"] = cls.LLM_API_KEY
+        os.environ["LLM_MODEL"] = cls.LLM_MODEL
+
+        env_file = cls.BASE_DIR / ".env"
+        lines = []
+        keys_updated = set()
+
+        if env_file.exists():
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped.startswith("LLM_BASE_URL="):
+                        lines.append(f"LLM_BASE_URL={cls.LLM_BASE_URL}\n")
+                        keys_updated.add("LLM_BASE_URL")
+                    elif stripped.startswith("LLM_API_KEY="):
+                        lines.append(f"LLM_API_KEY={cls.LLM_API_KEY}\n")
+                        keys_updated.add("LLM_API_KEY")
+                    elif stripped.startswith("LLM_MODEL="):
+                        lines.append(f"LLM_MODEL={cls.LLM_MODEL}\n")
+                        keys_updated.add("LLM_MODEL")
+                    else:
+                        lines.append(line)
+
+        if "LLM_BASE_URL" not in keys_updated:
+            lines.append(f"LLM_BASE_URL={cls.LLM_BASE_URL}\n")
+        if "LLM_API_KEY" not in keys_updated:
+            lines.append(f"LLM_API_KEY={cls.LLM_API_KEY}\n")
+        if "LLM_MODEL" not in keys_updated:
+            lines.append(f"LLM_MODEL={cls.LLM_MODEL}\n")
+
+        with open(env_file, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
 
 # Tự động khởi tạo thư mục tạm và xuất file ngay khi module được import
 Config.ensure_directories()
