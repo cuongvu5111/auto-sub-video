@@ -200,13 +200,18 @@ class MainWindow(QMainWindow):
         layout_source = QGridLayout(grp_source)
         layout_source.setVerticalSpacing(8)
         layout_source.setHorizontalSpacing(10)
+        layout_source.setColumnStretch(0, 0)
+        layout_source.setColumnStretch(1, 1)
+
         layout_source.addWidget(QLabel("Mode:"), 0, 0)
         self.cbo_mode = QComboBox()
+        self.cbo_mode.setFixedHeight(28)
         self.cbo_mode.addItems(["Auto — detect hardcoded subtitles", "Always run STT (Whisper)"])
         layout_source.addWidget(self.cbo_mode, 0, 1)
 
         layout_source.addWidget(QLabel("Source Language:"), 1, 0)
         self.cbo_lang = QComboBox()
+        self.cbo_lang.setFixedHeight(28)
         self.cbo_lang.addItems(["auto (Auto Detect)", "zh (Chinese)", "en (English)"])
         layout_source.addWidget(self.cbo_lang, 1, 1)
         left_col.addWidget(grp_source)
@@ -216,12 +221,16 @@ class MainWindow(QMainWindow):
         layout_trans = QGridLayout(grp_trans)
         layout_trans.setVerticalSpacing(8)
         layout_trans.setHorizontalSpacing(10)
+        layout_trans.setColumnStretch(0, 0)
+        layout_trans.setColumnStretch(1, 1)
+
         layout_trans.addWidget(QLabel("Translate With:"), 0, 0)
         h_model = QHBoxLayout()
         self.txt_model = QLineEdit(Config.LLM_MODEL)
+        self.txt_model.setFixedHeight(28)
         self.txt_model.setReadOnly(True)
         self.btn_change_model = QPushButton("Change...")
-        self.btn_change_model.setFixedHeight(30)
+        self.btn_change_model.setFixedHeight(28)
         self.btn_change_model.clicked.connect(self.action_change_model)
         h_model.addWidget(self.txt_model)
         h_model.addWidget(self.btn_change_model)
@@ -229,11 +238,13 @@ class MainWindow(QMainWindow):
 
         layout_trans.addWidget(QLabel("Engine Mode:"), 1, 0)
         self.cbo_trans_mode = QComboBox()
+        self.cbo_trans_mode.setFixedHeight(28)
         self.cbo_trans_mode.addItems(["Fast — Parallel", "Sequential — Accurate"])
         layout_trans.addWidget(self.cbo_trans_mode, 1, 1)
 
         layout_trans.addWidget(QLabel("Genre:"), 2, 0)
         self.cbo_genre = QComboBox()
+        self.cbo_genre.setFixedHeight(28)
         self.cbo_genre.addItems([
             "Daily Life / Social Media",
             "Humor / Comedy",
@@ -245,6 +256,7 @@ class MainWindow(QMainWindow):
 
         layout_trans.addWidget(QLabel("Custom Terms:"), 3, 0)
         self.txt_custom_terms = QLineEdit()
+        self.txt_custom_terms.setFixedHeight(28)
         self.txt_custom_terms.setPlaceholderText("Rules/Names, e.g., Luffy: Lu; Douyin: TikTok")
         layout_trans.addWidget(self.txt_custom_terms, 3, 1)
         left_col.addWidget(grp_trans)
@@ -259,14 +271,19 @@ class MainWindow(QMainWindow):
         layout_tts = QGridLayout(grp_tts)
         layout_tts.setVerticalSpacing(8)
         layout_tts.setHorizontalSpacing(10)
+        layout_tts.setColumnStretch(0, 0)
+        layout_tts.setColumnStretch(1, 1)
+
         layout_tts.addWidget(QLabel("Voice:"), 0, 0)
         self.cbo_voice = QComboBox()
+        self.cbo_voice.setFixedHeight(28)
         for label, voice_key in Config.AVAILABLE_VOICES.items():
             self.cbo_voice.addItem(label, voice_key)
         layout_tts.addWidget(self.cbo_voice, 0, 1)
 
         layout_tts.addWidget(QLabel("Background Ducking:"), 1, 0)
         self.spn_ducking = QDoubleSpinBox()
+        self.spn_ducking.setFixedHeight(28)
         self.spn_ducking.setRange(0.0, 1.0)
         self.spn_ducking.setSingleStep(0.02)
         self.spn_ducking.setValue(Config.DEFAULT_DUCKING_VOLUME)
@@ -274,6 +291,7 @@ class MainWindow(QMainWindow):
 
         layout_tts.addWidget(QLabel("Delay (sec):"), 2, 0)
         self.spn_delay = QDoubleSpinBox()
+        self.spn_delay.setFixedHeight(28)
         self.spn_delay.setRange(-2.0, 5.0)
         self.spn_delay.setValue(0.0)
         layout_tts.addWidget(self.spn_delay, 2, 1)
@@ -281,9 +299,10 @@ class MainWindow(QMainWindow):
         layout_tts.addWidget(QLabel("Voice Cloning:"), 3, 0)
         h_clone = QHBoxLayout()
         self.txt_clone = QLineEdit()
+        self.txt_clone.setFixedHeight(28)
         self.txt_clone.setPlaceholderText("(Optional) Select reference audio...")
         self.btn_browse_clone = QPushButton("📁")
-        self.btn_browse_clone.setFixedSize(36, 30)
+        self.btn_browse_clone.setFixedSize(36, 28)
         h_clone.addWidget(self.txt_clone)
         h_clone.addWidget(self.btn_browse_clone)
         layout_tts.addLayout(h_clone, 3, 1)
@@ -294,6 +313,8 @@ class MainWindow(QMainWindow):
         layout_export = QGridLayout(grp_export)
         layout_export.setVerticalSpacing(8)
         layout_export.setHorizontalSpacing(10)
+        layout_export.setColumnStretch(0, 0)
+        layout_export.setColumnStretch(1, 1)
 
         h_sub_opts = QHBoxLayout()
         self.chk_burn_sub = QCheckBox("Burn translated subtitles into video")
@@ -306,8 +327,10 @@ class MainWindow(QMainWindow):
         layout_export.addWidget(QLabel("Font:"), 1, 0)
         h_font = QHBoxLayout()
         self.cbo_font = QComboBox()
+        self.cbo_font.setFixedHeight(28)
         self.cbo_font.addItems(["Arial", "DejaVu Sans Bold", "Montserrat", "Segoe UI"])
         self.spn_font_size = QSpinBox()
+        self.spn_font_size.setFixedHeight(28)
         self.spn_font_size.setRange(10, 100)
         self.spn_font_size.setValue(22)
         h_font.addWidget(self.cbo_font, 2)
@@ -318,8 +341,10 @@ class MainWindow(QMainWindow):
         layout_export.addWidget(QLabel("Encoder:"), 2, 0)
         h_enc = QHBoxLayout()
         self.cbo_encoder = QComboBox()
+        self.cbo_encoder.setFixedHeight(28)
         self.cbo_encoder.addItems(["libx264 (CPU)", "copy (Passthrough - Instant)"])
         self.cbo_quality = QComboBox()
+        self.cbo_quality.setFixedHeight(28)
         self.cbo_quality.addItems(["Best", "1080p", "720p"])
         h_enc.addWidget(self.cbo_encoder, 2)
         h_enc.addWidget(QLabel("Quality:"), 1)
@@ -329,8 +354,9 @@ class MainWindow(QMainWindow):
         layout_export.addWidget(QLabel("Save To:"), 3, 0)
         h_out = QHBoxLayout()
         self.txt_output_dir = QLineEdit(str(Config.OUTPUT_DIR))
+        self.txt_output_dir.setFixedHeight(28)
         self.btn_browse_out = QPushButton("Browse...")
-        self.btn_browse_out.setFixedHeight(30)
+        self.btn_browse_out.setFixedHeight(28)
         self.btn_browse_out.clicked.connect(self.action_browse_output_dir)
         h_out.addWidget(self.txt_output_dir)
         h_out.addWidget(self.btn_browse_out)
@@ -502,37 +528,15 @@ class MainWindow(QMainWindow):
             }
             QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox {
                 border: 1px solid #CBD5E1;
-                border-radius: 5px;
-                padding: 4px 10px;
-                min-height: 28px;
+                border-radius: 4px;
+                padding: 2px 8px;
                 background-color: #FFFFFF;
                 color: #0F172A;
-                font-size: 13px;
+                font-size: 12px;
             }
             QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus {
-                border-color: #2563EB;
+                border: 1px solid #2563EB;
                 background-color: #FFFFFF;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 24px;
-                border-left: 1px solid #CBD5E1;
-                border-top-right-radius: 5px;
-                border-bottom-right-radius: 5px;
-            }
-            QDoubleSpinBox::up-button, QSpinBox::up-button {
-                subcontrol-origin: border;
-                subcontrol-position: top right;
-                width: 20px;
-                border-left: 1px solid #CBD5E1;
-                border-bottom: 1px solid #CBD5E1;
-            }
-            QDoubleSpinBox::down-button, QSpinBox::down-button {
-                subcontrol-origin: border;
-                subcontrol-position: bottom right;
-                width: 20px;
-                border-left: 1px solid #CBD5E1;
             }
             QComboBox QAbstractItemView {
                 background-color: #FFFFFF;
