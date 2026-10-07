@@ -41,20 +41,56 @@ def format_ass_timestamp(seconds: float) -> str:
     return f"{hrs}:{mins:02d}:{secs:02d}.{centis:02d}"
 
 
+def hex_to_ass_color(color_str: str, default: str = "&H00FFFFFF") -> str:
+    """
+    Chuyển đổi mã màu hex (ví dụ #000000 hoặc #FFFFFF) sang mã màu chuẩn ASS (&HAABBGGRR).
+    Nếu đã là định dạng ASS (&H...) thì giữ nguyên.
+    """
+    if not color_str:
+        return default
+    color_str = color_str.strip()
+    if color_str.startswith("&H") or color_str.startswith("&h"):
+        return color_str
+
+    if color_str.startswith("#"):
+        color_str = color_str[1:]
+
+    if len(color_str) == 3:
+        color_str = "".join(c * 2 for c in color_str)
+
+    if len(color_str) == 6 or len(color_str) == 8:
+        r = color_str[0:2].upper()
+        g = color_str[2:4].upper()
+        b = color_str[4:6].upper()
+        # Định dạng chuẩn ASS là &HAABBGGRR (Alpha=00 là đặc hoàn toàn)
+        return f"&H00{b}{g}{r}"
+
+    return default
+
+
 def generate_ass_file(
     segments: List[Dict[str, Any]],
     output_ass_path: Path,
     font_name: str = "Arial",
-    font_size: int = 20,
-    primary_color: str = "&H00FFFFFF",  # Màu trắng
-    outline_color: str = "&H00000000",  # Viền đen
-    outline_width: int = 3
+    font_size: int = 24,
+    primary_color: str = "&H00000000",   # Màu chữ (mặc định đen cho dạng TikTok badge)
+    outline_color: str = "&H00FFFFFF",   # Màu viền / viền hộp (mặc định trắng)
+    back_color: str = "&H00FFFFFF",      # Màu nền hộp (khi border_style=3)
+    border_style: int = 3,               # 3: Hộp nền (Box/Badge), 1: Viền đổ bóng (Outline)
+    outline_width: int = 6,              # Khoảng đệm hộp khi border_style=3, hoặc độ dày viền khi border_style=1
+    shadow_width: int = 0,               # Độ đổ bóng
+    margin_v: int = 40                   # Khoảng cách từ đáy video (pixel)
 ) -> Path:
     """
     Sinh file phụ đề định dạng ASS (Advanced SubStation Alpha) với kiểu chữ nổi bật cho TikTok.
+    Hỗ trợ BorderStyle 3 (hộp nền chữ nhật bao quanh chữ) hoặc BorderStyle 1 (viền bóng truyền thống).
     """
     output_ass_path = Path(output_ass_path).resolve()
     output_ass_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ass_primary = hex_to_ass_color(primary_color, default="&H00000000")
+    ass_outline = hex_to_ass_color(outline_color, default="&H00FFFFFF")
+    ass_back = hex_to_ass_color(back_color, default="&H00FFFFFF")
 
     header = f"""[Script Info]
 Title: AutoSub TikTok Dubbing
@@ -65,7 +101,7 @@ YCbCr Matrix: None
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: TikTokStyle,{font_name},{font_size},{primary_color},&H000000FF,{outline_color},&H80000000,-1,0,0,0,100,100,0,0,1,{outline_width},1,2,20,20,35,1
+Style: TikTokStyle,{font_name},{font_size},{ass_primary},&H000000FF,{ass_outline},{ass_back},-1,0,0,0,100,100,0,0,{border_style},{outline_width},{shadow_width},2,20,20,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

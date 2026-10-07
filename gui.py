@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, QLineEdit, QCheckBox,
     QLabel, QProgressBar, QTextEdit, QFileDialog, QInputDialog, QMessageBox,
-    QGroupBox
+    QGroupBox, QColorDialog
 )
 
 from config import Config
@@ -82,6 +82,7 @@ class DubbingWorker(QThread):
                     burn_subtitles=self.options.get("burn_subtitles", True),
                     genre=self.options.get("genre", "Daily Life / Social Media"),
                     custom_terms=self.options.get("custom_terms", ""),
+                    subtitle_options=self.options.get("subtitle_options"),
                     output_dir=self.options.get("output_dir"),
                     progress_callback=progress_hook
                 )
@@ -118,6 +119,48 @@ class MainWindow(QMainWindow):
             pass
 
         self.worker: Optional[DubbingWorker] = None
+
+        # Cấu hình Presets cho Subtitle Styling
+        self.SUB_STYLE_PRESETS = {
+            "White Box (Black Text)": {
+                "border_style": 3,
+                "text_color": "#000000",
+                "bg_color": "#FFFFFF",
+                "outline_color": "#FFFFFF",
+                "outline_width": 6,
+                "shadow_width": 0
+            },
+            "Black Box (White Text)": {
+                "border_style": 3,
+                "text_color": "#FFFFFF",
+                "bg_color": "#000000",
+                "outline_color": "#000000",
+                "outline_width": 6,
+                "shadow_width": 0
+            },
+            "Yellow Box (Black Text)": {
+                "border_style": 3,
+                "text_color": "#000000",
+                "bg_color": "#FACC15",
+                "outline_color": "#FACC15",
+                "outline_width": 6,
+                "shadow_width": 0
+            },
+            "Classic Outline (White / Shadow)": {
+                "border_style": 1,
+                "text_color": "#FFFFFF",
+                "bg_color": "#000000",
+                "outline_color": "#000000",
+                "outline_width": 3,
+                "shadow_width": 1
+            },
+            "Custom...": None
+        }
+        self.sub_border_style = 3
+        self.sub_text_color = "#000000"
+        self.sub_bg_color = "#FFFFFF"
+        self.sub_outline_width = 6
+        self.sub_shadow_width = 0
 
         self.init_ui()
         self.apply_styles()
@@ -379,7 +422,40 @@ class MainWindow(QMainWindow):
         h_font.addWidget(self.spn_font_size, 2)
         layout_export.addLayout(h_font, 1, 1)
 
-        layout_export.addWidget(QLabel("Encoder:"), 2, 0)
+        # Row 2: Sub Style (Presets + Color Swatches)
+        layout_export.addWidget(QLabel("Sub Style:"), 2, 0)
+        h_sub_style = QHBoxLayout()
+        h_sub_style.setSpacing(8)
+
+        self.cbo_sub_style = QComboBox()
+        self.cbo_sub_style.setFixedHeight(32)
+        self.cbo_sub_style.addItems(list(self.SUB_STYLE_PRESETS.keys()))
+        self.cbo_sub_style.currentTextChanged.connect(self.on_sub_style_changed)
+
+        lbl_sub_text = QLabel("Text:")
+        lbl_sub_text.setFixedWidth(30)
+        self.btn_sub_text_color = QPushButton()
+        self.btn_sub_text_color.setFixedSize(34, 28)
+        self.btn_sub_text_color.setCursor(Qt.PointingHandCursor)
+        self.btn_sub_text_color.clicked.connect(self.action_pick_sub_text_color)
+
+        lbl_sub_bg = QLabel("Box:")
+        lbl_sub_bg.setFixedWidth(28)
+        self.btn_sub_bg_color = QPushButton()
+        self.btn_sub_bg_color.setFixedSize(34, 28)
+        self.btn_sub_bg_color.setCursor(Qt.PointingHandCursor)
+        self.btn_sub_bg_color.clicked.connect(self.action_pick_sub_bg_color)
+
+        self.update_sub_color_swatches()
+
+        h_sub_style.addWidget(self.cbo_sub_style, 3)
+        h_sub_style.addWidget(lbl_sub_text, 0)
+        h_sub_style.addWidget(self.btn_sub_text_color, 0)
+        h_sub_style.addWidget(lbl_sub_bg, 0)
+        h_sub_style.addWidget(self.btn_sub_bg_color, 0)
+        layout_export.addLayout(h_sub_style, 2, 1)
+
+        layout_export.addWidget(QLabel("Encoder:"), 3, 0)
         h_enc = QHBoxLayout()
         h_enc.setSpacing(10)
         self.cbo_encoder = QComboBox()
@@ -393,9 +469,9 @@ class MainWindow(QMainWindow):
         h_enc.addWidget(self.cbo_encoder, 3)
         h_enc.addWidget(lbl_quality, 0)
         h_enc.addWidget(self.cbo_quality, 2)
-        layout_export.addLayout(h_enc, 2, 1)
+        layout_export.addLayout(h_enc, 3, 1)
 
-        layout_export.addWidget(QLabel("Save To:"), 3, 0)
+        layout_export.addWidget(QLabel("Save To:"), 4, 0)
         h_out = QHBoxLayout()
         h_out.setSpacing(6)
         self.txt_output_dir = QLineEdit(str(Config.OUTPUT_DIR))
@@ -406,7 +482,7 @@ class MainWindow(QMainWindow):
         self.btn_browse_out.clicked.connect(self.action_browse_output_dir)
         h_out.addWidget(self.txt_output_dir)
         h_out.addWidget(self.btn_browse_out)
-        layout_export.addLayout(h_out, 3, 1)
+        layout_export.addLayout(h_out, 4, 1)
         right_col.addWidget(grp_export)
 
         config_grid.addLayout(right_col, 0, 1)
@@ -769,6 +845,52 @@ class MainWindow(QMainWindow):
         else:
             subprocess.run(["xdg-open", str(folder)])
 
+    def update_sub_color_swatches(self):
+        """Update the background color and tooltip of the subtitle color preview buttons."""
+        self.btn_sub_text_color.setStyleSheet(
+            f"background-color: {self.sub_text_color}; border: 1px solid #94A3B8; border-radius: 4px;"
+        )
+        self.btn_sub_text_color.setToolTip(f"Text Color: {self.sub_text_color} (Click to change)")
+
+        self.btn_sub_bg_color.setStyleSheet(
+            f"background-color: {self.sub_bg_color}; border: 1px solid #94A3B8; border-radius: 4px;"
+        )
+        self.btn_sub_bg_color.setToolTip(f"Box / Background Color: {self.sub_bg_color} (Click to change)")
+
+    @Slot(str)
+    def on_sub_style_changed(self, style_name: str):
+        """Apply preset styling for subtitles."""
+        preset = self.SUB_STYLE_PRESETS.get(style_name)
+        if preset:
+            self.sub_border_style = preset["border_style"]
+            self.sub_text_color = preset["text_color"]
+            self.sub_bg_color = preset["bg_color"]
+            self.sub_outline_width = preset["outline_width"]
+            self.sub_shadow_width = preset["shadow_width"]
+            self.update_sub_color_swatches()
+
+    @Slot()
+    def action_pick_sub_text_color(self):
+        """Open color dialog to pick subtitle text color."""
+        color = QColorDialog.getColor(QColor(self.sub_text_color), self, "Select Text Color")
+        if color.isValid():
+            self.sub_text_color = color.name().upper()
+            self.cbo_sub_style.blockSignals(True)
+            self.cbo_sub_style.setCurrentText("Custom...")
+            self.cbo_sub_style.blockSignals(False)
+            self.update_sub_color_swatches()
+
+    @Slot()
+    def action_pick_sub_bg_color(self):
+        """Open color dialog to pick subtitle background box color."""
+        color = QColorDialog.getColor(QColor(self.sub_bg_color), self, "Select Box Background Color")
+        if color.isValid():
+            self.sub_bg_color = color.name().upper()
+            self.cbo_sub_style.blockSignals(True)
+            self.cbo_sub_style.setCurrentText("Custom...")
+            self.cbo_sub_style.blockSignals(False)
+            self.update_sub_color_swatches()
+
     @Slot()
     def action_start_dubbing(self):
         """Start batch processing via DubbingWorker thread."""
@@ -791,6 +913,17 @@ class MainWindow(QMainWindow):
             source_lang = "auto"
 
         voice_key = self.cbo_voice.currentData()
+        subtitle_options = {
+            "font_name": self.cbo_font.currentText(),
+            "font_size": self.spn_font_size.value(),
+            "primary_color": self.sub_text_color,
+            "outline_color": self.sub_bg_color if self.sub_border_style == 3 else "#000000",
+            "back_color": self.sub_bg_color,
+            "border_style": self.sub_border_style,
+            "outline_width": self.sub_outline_width,
+            "shadow_width": self.sub_shadow_width,
+            "margin_v": 40
+        }
         options = {
             "source_lang": source_lang,
             "voice": voice_key,
@@ -798,6 +931,7 @@ class MainWindow(QMainWindow):
             "burn_subtitles": self.chk_burn_sub.isChecked(),
             "genre": self.cbo_genre.currentText(),
             "custom_terms": self.txt_custom_terms.text().strip(),
+            "subtitle_options": subtitle_options,
             "output_dir": Path(self.txt_output_dir.text()).resolve()
         }
 

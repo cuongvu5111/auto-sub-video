@@ -33,6 +33,7 @@ def run_pipeline(
     burn_subtitles: bool = True,
     genre: str = "Daily Life / Social Media",
     custom_terms: str = "",
+    subtitle_options: Optional[Dict[str, Any]] = None,
     output_dir: Optional[Path] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None
 ) -> Path:
@@ -118,7 +119,20 @@ def run_pipeline(
     ass_file = None
     if burn_subtitles:
         ass_file = Config.TEMP_DIR / f"{video_path.stem}_sub.ass"
-        generate_ass_file(dubbed_segments, ass_file)
+        sub_opts = subtitle_options or {}
+        generate_ass_file(
+            dubbed_segments,
+            ass_file,
+            font_name=sub_opts.get("font_name", "Arial"),
+            font_size=sub_opts.get("font_size", 24),
+            primary_color=sub_opts.get("primary_color", "&H00000000"),
+            outline_color=sub_opts.get("outline_color", "&H00FFFFFF"),
+            back_color=sub_opts.get("back_color", "&H00FFFFFF"),
+            border_style=sub_opts.get("border_style", 3),
+            outline_width=sub_opts.get("outline_width", 6),
+            shadow_width=sub_opts.get("shadow_width", 0),
+            margin_v=sub_opts.get("margin_v", 40)
+        )
 
     # 6c. Render finalized video
     final_video_name = f"{video_path.stem}_vi.mp4"
