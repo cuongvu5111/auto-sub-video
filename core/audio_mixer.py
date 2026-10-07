@@ -8,7 +8,7 @@ import sys
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional, Callable, List, Dict, Any
+from typing import Optional, Callable, List, Dict, Any, Union
 from config import Config
 from core.audio_extractor import find_ffmpeg
 from core.tts_engine import get_audio_duration
@@ -85,6 +85,79 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return output_ass_path
 
 
+def _init_pydub():
+    """Cấu hình pydub dùng ffmpeg portable và fallback mediainfo bằng PyAV nếu thiếu ffprobe."""
+    try:
+        import pydub
+        import pydub.audio_segment
+        import pydub.utils
+    except ImportError:
+        return
+
+    # 1. Cấu hình ffmpeg converter
+    ffmpeg_bin = find_ffmpeg()
+    pydub.AudioSegment.converter = str(ffmpeg_bin)
+
+    # 2. Đảm bảo bin/ nằm trong PATH
+    bin_dir = str(Config.BIN_DIR.resolve())
+    if bin_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+
+    # 3. Fallback đọc thông tin media bằng PyAV nếu hệ thống chưa cài ffprobe độc lập
+    def _av_mediainfo(filepath, read_ahead_limit=-1):
+        try:
+            import av
+            with av.open(str(filepath)) as container:
+                streams = []
+                for s in container.streams.audio:
+                    ctx = s.codec_context
+                    fmt_name = ctx.format.name if ctx.format else "s16"
+                    bits = ctx.format.bits if (ctx.format and hasattr(ctx.format, "bits") and ctx.format.bits > 0) else 16
+                    streams.append({
+                        "codec_type": "audio",
+                        "codec_name": ctx.name,
+                        "sample_fmt": fmt_name,
+                        "bits_per_sample": bits,
+                        "channels": ctx.channels,
+                        "sample_rate": str(ctx.sample_rate),
+                        "index": s.index
+                    })
+                duration_sec = float(container.duration / av.time_base) if container.duration else 0.0
+                return {
+                    "streams": streams,
+                    "format": {
+                        "duration": str(duration_sec),
+                        "size": str(os.path.getsize(filepath)) if os.path.exists(filepath) else "0"
+                    }
+                }
+        except Exception:
+            return None
+
+    pydub.utils.mediainfo_json = _av_mediainfo
+    pydub.audio_segment.mediainfo_json = _av_mediainfo
+
+
+def _load_audio_file(file_path: Union[str, Path]):
+    """
+    Nạp tệp âm thanh an toàn qua pydub:
+    - Nhận diện định dạng phổ biến (.wav, .mp3) để nạp thẳng không cần qua ffprobe.
+    - Tự động gọi fallback qua PyAV cho các định dạng khác.
+    """
+    from pydub import AudioSegment
+    p = Path(file_path).resolve()
+    ext = p.suffix.lower()
+    if ext == ".wav":
+        return AudioSegment.from_file(str(p), format="wav", codec="pcm_s16le")
+    elif ext == ".mp3":
+        return AudioSegment.from_file(str(p), format="mp3", codec="mp3")
+    else:
+        return AudioSegment.from_file(str(p))
+
+
+# Tự động cấu hình pydub ngay khi nạp module
+_init_pydub()
+
+
 def create_mixed_audio_track(
     original_audio_path: Path,
     segments: List[Dict[str, Any]],
@@ -103,6 +176,8 @@ def create_mixed_audio_track(
     except ImportError:
         raise AudioMixerError("Thư viện pydub chưa được cài đặt. Vui lòng chạy: pip install pydub")
 
+    _init_pydub()
+
     orig_path = Path(original_audio_path).resolve()
     out_path = Path(output_audio_path).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,7 +186,7 @@ def create_mixed_audio_track(
         raise FileNotFoundError(f"Không tìm thấy file audio gốc: {original_audio_path}")
 
     # 1. Nạp audio gốc và giảm âm lượng
-    orig_audio = AudioSegment.from_file(str(orig_path))
+    orig_audio = _load_audio_file(orig_path)
     
     # Tính toán mức giảm dB dựa trên tỷ lệ volume (0.10 ~ -20dB)
     import math
@@ -135,7 +210,7 @@ def create_mixed_audio_track(
             continue
 
         start_ms = int(seg.get("start", 0.0) * 1000)
-        seg_audio = AudioSegment.from_file(dubbed_file)
+        seg_audio = _load_audio_file(dubbed_file)
 
         # Chèn âm thanh lồng tiếng vào đúng vị trí start_ms
         speech_track = speech_track.overlay(seg_audio, position=start_ms)

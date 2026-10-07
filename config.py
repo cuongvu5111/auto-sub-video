@@ -10,6 +10,11 @@ from pathlib import Path
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("PYTHONUTF8", "1")
 
+# Tự động đưa thư mục bin vào PATH để FFmpeg portable luôn sẵn sàng
+_bin_dir = Path(__file__).resolve().parent / "bin"
+if _bin_dir.exists() and str(_bin_dir) not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = str(_bin_dir) + os.pathsep + os.environ.get("PATH", "")
+
 # Thử nạp biến môi trường từ tệp .env nếu thư viện python-dotenv đã được cài đặt
 env_path = Path(__file__).resolve().parent / ".env"
 try:
@@ -37,6 +42,9 @@ class Config:
 
     # Đường dẫn thư mục gốc dự án
     BASE_DIR: Path = Path(__file__).resolve().parent
+
+    # Thư mục chứa các tệp thực thi portable (FFmpeg)
+    BIN_DIR: Path = BASE_DIR / "bin"
 
     # Thư mục chứa dữ liệu tạm (audio cắt nhỏ, video tải về)
     TEMP_DIR: Path = BASE_DIR / "temp"
