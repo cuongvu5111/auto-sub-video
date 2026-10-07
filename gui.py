@@ -118,8 +118,7 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 8, 10, 10)
         main_layout.setSpacing(8)
 
-        # 1. TOP HEADER & TABS
-        top_bar = QHBoxLayout()
+        # 1. TOP TABS (Full Width across the window)
         self.tabs = QTabWidget()
         self.tab_dubbing = QWidget()
         self.tab_subs = QWidget()
@@ -129,13 +128,12 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_subs, "📝 Subtitle Translation")
         self.tabs.addTab(self.tab_models, "⚙️ Model Manager")
 
-        # Status Indicators in top right
-        self.lbl_indicators = QLabel("Network: ✓  |  LLM: ✓  |  Whisper: ✓  |  FFmpeg: ✓")
-        self.lbl_indicators.setStyleSheet("color: #27AE60; font-weight: bold; padding-right: 8px;")
+        # Status Indicators in the top-right corner of tabs
+        self.lbl_indicators = QLabel("Network: ✓  |  LLM: ✓  |  Whisper: ✓  |  FFmpeg: ✓   ")
+        self.lbl_indicators.setStyleSheet("color: #16A34A; font-weight: bold; font-size: 12px; margin-right: 10px;")
+        self.tabs.setCornerWidget(self.lbl_indicators, Qt.TopRightCorner)
 
-        top_bar.addWidget(self.tabs)
-        top_bar.addWidget(self.lbl_indicators, alignment=Qt.AlignRight | Qt.AlignTop)
-        main_layout.addLayout(top_bar)
+        main_layout.addWidget(self.tabs)
 
         # MAIN VIDEO DUBBING TAB LAYOUT
         tab_layout = QVBoxLayout(self.tab_dubbing)
@@ -334,21 +332,22 @@ class MainWindow(QMainWindow):
         ctrl_layout = QHBoxLayout()
         self.btn_run = QPushButton("▶  Start")
         self.btn_run.setFixedHeight(34)
-        self.btn_run.setStyleSheet("background-color: #27AE60; color: white; font-weight: bold; font-size: 13px; border-radius: 4px; padding: 0 20px;")
+        self.btn_run.setStyleSheet("background-color: #16A34A; color: #FFFFFF; font-weight: bold; font-size: 13px; border-radius: 4px; padding: 0 20px; border: 1px solid #15803D;")
         self.btn_run.clicked.connect(self.action_start_dubbing)
 
         self.btn_stop = QPushButton("■  Stop")
         self.btn_stop.setFixedHeight(34)
         self.btn_stop.setEnabled(False)
-        self.btn_stop.setStyleSheet("background-color: #E74C3C; color: white; font-weight: bold; font-size: 13px; border-radius: 4px; padding: 0 15px;")
+        self.btn_stop.setStyleSheet("background-color: #DC2626; color: #FFFFFF; font-weight: bold; font-size: 13px; border-radius: 4px; padding: 0 15px; border: 1px solid #B91C1C;")
         self.btn_stop.clicked.connect(self.action_stop_dubbing)
 
         self.btn_open_folder = QPushButton("📁 Open Result Folder")
         self.btn_open_folder.setFixedHeight(34)
+        self.btn_open_folder.setStyleSheet("background-color: #FFFFFF; color: #0F172A; font-weight: bold; font-size: 12px; border-radius: 4px; padding: 0 14px; border: 1px solid #CBD5E1;")
         self.btn_open_folder.clicked.connect(self.action_open_output_folder)
 
         self.lbl_stats = QLabel("Ready to process")
-        self.lbl_stats.setStyleSheet("color: #555; font-size: 12px;")
+        self.lbl_stats.setStyleSheet("color: #475569; font-size: 12px; font-weight: 500;")
 
         ctrl_layout.addWidget(self.btn_run)
         ctrl_layout.addWidget(self.btn_stop)
@@ -397,54 +396,136 @@ class MainWindow(QMainWindow):
         tab_layout.addWidget(self.txt_console)
 
     def apply_styles(self):
-        """Apply clean styles for Windows desktop theme."""
+        """Apply high-contrast, polished stylesheet compatible with both Light and Dark Windows themes."""
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #F8F9FA;
+                background-color: #F1F5F9;
+            }
+            QWidget {
+                color: #0F172A;
+                font-family: "Segoe UI", Arial, sans-serif;
+            }
+            QTabWidget::pane {
+                border: 1px solid #CBD5E1;
+                background-color: #F8FAFC;
+                border-radius: 4px;
+            }
+            QTabBar::tab {
+                background-color: #E2E8F0;
+                color: #334155;
+                font-weight: bold;
+                padding: 7px 18px;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+                margin-right: 3px;
+                border: 1px solid #CBD5E1;
+                border-bottom: none;
+            }
+            QTabBar::tab:selected {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-bottom: 1px solid #FFFFFF;
             }
             QGroupBox {
                 font-weight: bold;
-                border: 1px solid #D1D5DB;
+                font-size: 13px;
+                border: 1px solid #CBD5E1;
                 border-radius: 6px;
-                margin-top: 6px;
-                padding-top: 10px;
+                margin-top: 10px;
+                padding-top: 14px;
                 background-color: #FFFFFF;
+                color: #0F172A;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
+                subcontrol-position: top left;
                 left: 10px;
-                padding: 0 4px;
+                padding: 0 6px;
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #1E293B;
+                font-size: 12px;
+            }
+            QCheckBox {
+                color: #1E293B;
+                font-size: 12px;
+                spacing: 6px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #94A3B8;
+                border-radius: 3px;
+                background-color: #FFFFFF;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #2563EB;
+                border-color: #2563EB;
             }
             QPushButton {
                 background-color: #FFFFFF;
-                border: 1px solid #D1D5DB;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
                 border-radius: 4px;
                 padding: 5px 12px;
                 font-size: 12px;
+                font-weight: 500;
             }
             QPushButton:hover {
-                background-color: #F3F4F6;
-                border-color: #9CA3AF;
+                background-color: #F1F5F9;
+                border-color: #64748B;
+                color: #0F172A;
+            }
+            QPushButton:pressed {
+                background-color: #E2E8F0;
+            }
+            QPushButton:disabled {
+                background-color: #F8FAFC;
+                color: #94A3B8;
+                border-color: #E2E8F0;
             }
             QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox {
-                border: 1px solid #D1D5DB;
+                border: 1px solid #CBD5E1;
                 border-radius: 4px;
-                padding: 4px 6px;
+                padding: 4px 8px;
                 background-color: #FFFFFF;
+                color: #0F172A;
                 font-size: 12px;
+            }
+            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus {
+                border-color: #2563EB;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                selection-background-color: #E0F2FE;
+                selection-color: #0F172A;
             }
             QTableWidget {
                 background-color: #FFFFFF;
-                border: 1px solid #D1D5DB;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
                 border-radius: 4px;
-                gridline-color: #F3F4F6;
+                gridline-color: #E2E8F0;
+                selection-background-color: #E0F2FE;
+                selection-color: #0F172A;
             }
             QHeaderView::section {
-                background-color: #F3F4F6;
-                border: none;
-                border-bottom: 1px solid #D1D5DB;
-                padding: 4px;
+                background-color: #F8FAFC;
+                color: #334155;
                 font-weight: bold;
+                border: none;
+                border-bottom: 1px solid #CBD5E1;
+                border-right: 1px solid #E2E8F0;
+                padding: 6px;
             }
         """)
 
