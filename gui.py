@@ -106,7 +106,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("AutoDub Studio - AI Video Dubbing & Subtitles")
         self.resize(1280, 860)
-        self.setMinimumSize(1080, 720)
+        self.setMinimumSize(1080, 760)
 
         # Căn giữa cửa sổ trên màn hình desktop
         try:
@@ -191,8 +191,8 @@ class MainWindow(QMainWindow):
 
         # MAIN VIDEO DUBBING TAB LAYOUT
         tab_layout = QVBoxLayout(self.tab_dubbing)
-        tab_layout.setContentsMargins(8, 10, 8, 8)
-        tab_layout.setSpacing(10)
+        tab_layout.setContentsMargins(8, 8, 8, 8)
+        tab_layout.setSpacing(8)
 
         # 2. VIDEO QUEUE SECTION
         lbl_queue = QLabel("<b>Videos to Dub</b>")
@@ -230,7 +230,7 @@ class MainWindow(QMainWindow):
         self.table_queue.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table_queue.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table_queue.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table_queue.setFixedHeight(115)
+        self.table_queue.setFixedHeight(105)
         self.table_queue.setSelectionBehavior(QTableWidget.SelectRows)
         tab_layout.addWidget(self.table_queue)
 
@@ -489,10 +489,10 @@ class MainWindow(QMainWindow):
         h_out.setSpacing(8)
         self.txt_output_dir = QLineEdit(str(Config.OUTPUT_DIR))
         self.txt_output_dir.setFixedHeight(32)
-        self.btn_browse_out = QPushButton("Browse...")
+        self.btn_browse_out = QPushButton("Browser")
         self.btn_browse_out.setFixedHeight(32)
-        self.btn_browse_out.setFixedWidth(90)
-        self.btn_browse_out.setStyleSheet("background-color: #F8FAFC; color: #0F172A; font-weight: 500; font-size: 12px; border: 1px solid #CBD5E1; border-radius: 6px; padding: 0 14px;")
+        self.btn_browse_out.setFixedWidth(78)
+        self.btn_browse_out.setStyleSheet("background-color: #F8FAFC; color: #0F172A; font-weight: 500; font-size: 12px; border: 1px solid #CBD5E1; border-radius: 6px; padding: 0 8px;")
         self.btn_browse_out.clicked.connect(self.action_browse_output_dir)
         h_out.addWidget(self.txt_output_dir)
         h_out.addWidget(self.btn_browse_out)
@@ -526,8 +526,9 @@ class MainWindow(QMainWindow):
         ctrl_layout.addWidget(self.btn_run)
         ctrl_layout.addWidget(self.btn_stop)
         ctrl_layout.addWidget(self.btn_open_folder)
-        ctrl_layout.addStretch()
+        ctrl_layout.addSpacing(16)
         ctrl_layout.addWidget(self.lbl_stats)
+        ctrl_layout.addStretch()
         tab_layout.addLayout(ctrl_layout)
 
         # Smooth Green Progress Bar
@@ -552,7 +553,7 @@ class MainWindow(QMainWindow):
         # 6. TERMINAL CONSOLE LOG VIEWER
         self.txt_console = QTextEdit()
         self.txt_console.setReadOnly(True)
-        self.txt_console.setFixedHeight(110)
+        self.txt_console.setFixedHeight(95)
         self.txt_console.setFont(QFont("Consolas", 10))
         self.txt_console.setStyleSheet("""
             QTextEdit {
