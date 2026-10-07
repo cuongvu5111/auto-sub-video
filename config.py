@@ -58,7 +58,7 @@ class Config:
         _raw_url = _raw_url[:-len("/chat/completions")]
     LLM_BASE_URL: str = _raw_url
 
-    LLM_MODEL: str = os.getenv("LLM_MODEL") or os.getenv("VNPT_LLM_MODEL", "google/gemma-4-26B-A4B-it")
+    LLM_MODEL: str = os.getenv("LLM_MODEL") or os.getenv("VNPT_LLM_MODEL", "global-llm")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("VNPT_LLM_API_KEY", "no-key-required")
 
     # Cấu hình Whisper Speech-to-Text

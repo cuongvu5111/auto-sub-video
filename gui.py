@@ -357,10 +357,11 @@ class WatermarkConfigDialog(QDialog):
         self.spn_text_font_size.setValue(int(self.config.get("text_font_size", 22)))
 
         # Logo Watermark values
-        self.chk_logo_enable.setChecked(self.config.get("logo_enabled", False))
         logo_path = self.config.get("logo_path", "")
         self.txt_logo_path.setText(logo_path)
         self.update_logo_preview(logo_path)
+        has_logo_file = bool(logo_path and Path(logo_path).is_file())
+        self.chk_logo_enable.setChecked(self.config.get("logo_enabled", has_logo_file))
 
         logo_pos = self.config.get("logo_position", "top-right")
         idx_logo_pos = self.cbo_logo_pos.findData(logo_pos)
@@ -394,6 +395,7 @@ class WatermarkConfigDialog(QDialog):
         )
         if file_path:
             self.txt_logo_path.setText(file_path)
+            self.chk_logo_enable.setChecked(True)
 
     def action_save(self):
         self.config["text_enabled"] = self.chk_text_enable.isChecked()
@@ -402,8 +404,10 @@ class WatermarkConfigDialog(QDialog):
         self.config["text_position"] = self.cbo_text_pos.currentData() or "center"
         self.config["text_font_size"] = self.spn_text_font_size.value()
 
-        self.config["logo_enabled"] = self.chk_logo_enable.isChecked()
-        self.config["logo_path"] = self.txt_logo_path.text().strip()
+        logo_raw_path = self.txt_logo_path.text().strip()
+        has_file = bool(logo_raw_path and Path(logo_raw_path).is_file())
+        self.config["logo_enabled"] = self.chk_logo_enable.isChecked() if has_file else False
+        self.config["logo_path"] = logo_raw_path
         self.config["logo_position"] = self.cbo_logo_pos.currentData() or "top-right"
         self.config["logo_opacity"] = self.slider_opacity.value() / 100.0
         self.config["logo_max_width"] = self.spn_logo_max_width.value()
@@ -483,8 +487,8 @@ class MainWindow(QMainWindow):
             },
             "VNPT-SI AI Gateway": {
                 "base_url": "https://llm.vnptsi.vn/v1",
-                "api_key": Config.LLM_API_KEY if "vnptsi" in Config.LLM_BASE_URL else "no-key-required",
-                "model": "google/gemma-4-26B-A4B-it"
+                "api_key": Config.LLM_API_KEY if ("vnptsi" in Config.LLM_BASE_URL and Config.LLM_API_KEY != "no-key-required") else "sk-FPLy2OadJQoN9haTvKjGHg",
+                "model": "global-llm"
             },
             "Ollama (Local - http://localhost:11434/v1)": {
                 "base_url": "http://localhost:11434/v1",

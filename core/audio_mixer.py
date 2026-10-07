@@ -347,9 +347,11 @@ def render_final_video(
     # Kiểm tra cấu hình Logo Watermark
     has_logo = False
     logo_path = None
-    if watermark_options and watermark_options.get("logo_enabled", False):
+    if watermark_options:
         candidate_path = watermark_options.get("logo_path")
-        if candidate_path and Path(candidate_path).exists():
+        logo_flag = watermark_options.get("logo_enabled")
+        is_enabled = logo_flag if logo_flag is not None else bool(candidate_path)
+        if is_enabled and candidate_path and Path(candidate_path).exists():
             has_logo = True
             logo_path = Path(candidate_path).resolve()
 

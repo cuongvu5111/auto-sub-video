@@ -168,7 +168,11 @@ def translate_segments(
                     translation_map[item["index"]] = item.get("translated_text", "").strip()
 
         except Exception as e:
-            # Nếu 1 batch gặp lỗi phân tích JSON thì fallback về câu gốc
+            # Thông báo cảnh báo lỗi LLM qua callback để hiển thị trên UI console
+            err_msg = str(e).replace("\n", " ")
+            if progress_callback:
+                progress_callback(f"⚠️ LLM translation error ({err_msg[:80]}). Using original text.", percent)
+            # Nếu 1 batch gặp lỗi phân tích JSON hoặc timeout thì fallback về câu gốc
             for seg in chunk:
                 if seg["index"] not in translation_map:
                     translation_map[seg["index"]] = seg["text"]
