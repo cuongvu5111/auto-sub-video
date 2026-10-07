@@ -1,72 +1,76 @@
-# PROJECT CONTEXT: Auto-Sub & AI Dubbing Video TikTok
+# PROJECT CONTEXT: AutoSub Dubbing Studio
 
-## 1. Giới Thiệu Dự Án
-Công cụ tự động hóa toàn trình (end-to-end) tải video ngắn từ TikTok/Douyin (đặc biệt là tiếng Trung), trích xuất giọng nói, phiên âm, dịch sang tiếng Việt bằng mô hình LLM chuyên sâu, tạo giọng lồng tiếng tiếng Việt tự nhiên (AI Dubbing) và đóng gói video thành phẩm kèm phụ đề chữ kiểu TikTok.
+## 1. Project Overview
+An end-to-end automated desktop tool designed to download short videos from TikTok, Douyin, and other social platforms (especially Chinese content), extract speech, transcribe audio, translate contextual dialogues using LLMs, generate natural AI dubbing voices (via Edge Neural TTS), synchronize timeline speed, perform smart audio ducking, and render finalized videos with TikTok-style animated subtitles.
 
-Tiêu chí tiên quyết: **Tối ưu chi phí (100% miễn phí / mã nguồn mở), chạy mượt mà trên môi trường máy tính cá nhân (hệ điều hành Windows, hỗ trợ chạy tốt trên CPU không cần GPU rời).**
-
----
-
-## 2. Tech Stack & Hạ Tầng
-
-* **Ngôn ngữ**: Python 3.10+
-* **Tải Video**: `yt-dlp` (hỗ trợ TikTok/Douyin không watermark)
-* **Speech-to-Text (STT)**: `faster-whisper` (sử dụng model `base` hoặc `small`, cấu hình chạy CPU với chế độ lượng tử hóa `compute_type="int8"`)
-* **Mô hình Ngôn ngữ (LLM)**:
-  * **Endpoint**: Hỗ trợ chuẩn OpenAI-compatible (cấu hình qua `LLM_BASE_URL`, có thể dùng Ollama local `http://localhost:11434/v1`, hoặc custom gateway).
-  * **Model**: Mô hình ngôn ngữ mở tối ưu (ví dụ: `gemma3:4b`, `gemma-4-26B-A4B-it`, `gpt-4o-mini`).
-  * **Mục đích**: Dịch thoát ý, tối ưu độ dài câu thoại phù hợp với nhịp độ video ngắn, ngắt dòng phụ đề chuẩn xác.
-* **Text-to-Speech (TTS)**: `edge-tts` (Microsoft Edge Neural Voice)
-  * Giọng Nam: `vi-VN-NamMinhNeural`
-  * Giọng Nữ: `vi-VN-HoaiMyNeural`
-* **Xử lý Audio/Video**: `FFmpeg` (kết hợp `pydub` và lệnh subprocess native)
-  * Bộ lọc `atempo`: Điều chỉnh tốc độ giọng đọc ăn khớp thời lượng video gốc.
-  * Bộ lọc `amix` & `volume`: Audio Ducking (giảm âm lượng tiếng gốc xuống 10-15%, đè tiếng lồng tiếng Việt 100%).
-* **Giao diện Người dùng**: `PySide6` (ứng dụng Desktop Native đa luồng kiểu AutoDub Studio cho Windows) kèm CLI fallback.
+Core Principle: **Cost-effective (100% Free & Open-Source), lightweight, and optimized to run smoothly on standard Windows PCs (CPU-friendly, no discrete GPU required).**
 
 ---
 
-## 3. Kiến Trúc Thư Mục Dự Án
+## 2. Tech Stack & Infrastructure
+
+* **Programming Language**: Python 3.10+
+* **Video Downloader**: `yt-dlp` (supports watermark-free downloads from TikTok/Douyin)
+* **Speech-to-Text (STT)**: `faster-whisper` (utilizing `base` or `small` models, optimized for CPU execution with INT8 quantization: `compute_type="int8"`)
+* **Large Language Model (LLM)**:
+  * **Endpoint**: OpenAI-compatible standard (configured via `LLM_BASE_URL`, supports local Ollama `http://localhost:11434/v1`, Groq, or custom gateways).
+  * **Model**: Open instruction-tuned models (e.g., `gemma3:4b`, `gemma-4-26B-A4B-it`, `gpt-4o-mini`).
+  * **Objective**: Context-aware natural translation, syllable-count constraint matching video pacing, and structured JSON output.
+* **Text-to-Speech (TTS)**: `edge-tts` (Microsoft Edge Neural Voice service - free, unlimited)
+  * Male Voice: `vi-VN-NamMinhNeural` (expressive, deep)
+  * Female Voice: `vi-VN-HoaiMyNeural` (gentle, clear)
+* **Audio & Video Processing**: `FFmpeg` (integrated portable binary v7.1 in `bin/ffmpeg.exe` + `pydub`)
+  * `atempo` filter: Dynamically stretches/compresses voice tempo (0.85x - 1.30x) without altering pitch to match original video timing.
+  * `amix` & `volume` filter: Smart Audio Ducking (drops original audio volume to 10% for ambient/music preservation, overlays 100% dubbing audio).
+* **User Interface**: `PySide6` (Native Windows Desktop Studio matching the AutoDub Studio design) with CLI fallback.
+
+---
+
+## 3. Project Directory Structure
 
 ```
 auto-sub-video/
-├── .env.example              # Mẫu biến môi trường (LLM_BASE_URL, LLM_MODEL, LLM_API_KEY,...)
-├── requirements.txt          # Danh sách thư viện Python
-├── config.py                 # Quản lý cấu hình tập trung (Pydantic / Dataclass)
+├── .env.example              # Sample environment variables (LLM_BASE_URL, LLM_MODEL, etc.)
+├── requirements.txt          # Python dependencies
+├── config.py                 # Centralized configuration management
+├── bin/
+│   └── ffmpeg.exe            # Pre-bundled portable FFmpeg binary (v7.1)
 ├── core/
 │   ├── __init__.py
-│   ├── downloader.py         # Module tải video TikTok không watermark (yt-dlp)
-│   ├── audio_extractor.py    # Module tách audio từ video sang định dạng WAV 16kHz
-│   ├── transcriber.py        # Module STT nhận diện câu thoại & timestamp (faster-whisper)
-│   ├── translator.py         # Module dịch thuật & chuẩn hóa qua LLM (OpenAI-compatible)
-│   ├── tts_engine.py         # Module sinh giọng đọc tiếng Việt & căn chỉnh tốc độ (edge-tts + atempo)
-│   └── audio_mixer.py        # Module hòa âm (ducking audio gốc + lồng tiếng) & xuất video (FFmpeg)
-├── pipeline.py               # Điều phối toàn bộ luồng xử lý từ URL -> Video kết quả
-├── gui.py                    # Giao diện Desktop Native (PySide6) kiểu AutoDub Studio
-├── docs/                     # Tài liệu kế hoạch & hướng dẫn kiến trúc
-│   └── implementation_plan.md
-└── temp/                     # Thư mục lưu trữ file tạm (video tải về, audio cắt lẻ, cache)
+│   ├── downloader.py         # Watermark-free video downloader (yt-dlp)
+│   ├── audio_extractor.py    # 16kHz mono WAV audio extractor (FFmpeg)
+│   ├── transcriber.py        # Speech-to-Text with word timestamps (faster-whisper)
+│   ├── translator.py         # LLM translation with strict JSON format
+│   ├── tts_engine.py         # AI voice synthesis and atempo speed sync (edge-tts)
+│   └── audio_mixer.py        # Audio ducking and video packaging (FFmpeg)
+├── pipeline.py               # End-to-end processing pipeline orchestrator & CLI
+├── gui.py                    # PySide6 Native Desktop Studio application
+├── run_gui.bat               # 1-Click Windows launcher script
+├── build_exe.py              # PyInstaller executable builder script (.exe)
+├── docs/
+│   └── implementation_plan.md# Multi-phase roadmap and checklists
+└── tests/                    # Comprehensive unit and integration test suite
 ```
 
 ---
 
-## 4. Quy Ước Phát Triển (Conventions)
+## 4. Development Conventions
 
-1. **Ngôn ngữ giao tiếp & Ghi chú mã nguồn**: Sử dụng Tiếng Việt cho toàn bộ comment trong code, docstring và commit message.
-2. **Xử lý ngoại lệ**: Luôn bắt exception cụ thể (ví dụ: `DownloadError`, `APIConnectionError`), không dùng `except Exception: pass`. Ghi log rõ ràng từng bước.
-3. **Quản lý file tạm**: Mọi file audio/video trung gian phải được lưu trong thư mục `temp/` và có cơ chế tự động dọn dẹp sau khi hoàn thành pipeline.
-4. **Định dạng dữ liệu trung gian**: Dữ liệu timeline giữa các module luôn tuân theo schema chuẩn:
+1. **Global Readiness**: All user-facing documentation, UI labels, button tooltips, and status messages must be in English.
+2. **Exception Handling**: Catch specific exceptions (`DownloadError`, `TranscriptionError`, `TranslationError`, `TTSError`, `AudioMixerError`) rather than generic `Exception`.
+3. **Temporary Files**: All intermediate audio/video artifacts must reside in `temp/` and be cleaned up appropriately.
+4. **Intermediate Data Schema**: Timeline data exchanged between modules must adhere to standard schemas:
    ```json
    [
      {
-       "index": 1,
+       "index": 0,
        "start": 0.0,
-       "end": 2.5,
-       "original_text": "今天我们要分享一个实用技巧",
-       "translated_text": "Hôm nay mình chia sẻ một mẹo siêu hay nè",
-       "audio_path": "temp/segment_1.mp3",
-       "duration": 2.3
+       "end": 2.15,
+       "text": "Original dialogue",
+       "translated_text": "Translated concise sentence",
+       "dubbed_audio_path": "temp/synced_seg_0.mp3",
+       "dubbed_duration": 2.12
      }
    ]
    ```
-5. **Tương thích Windows**: Mọi đường dẫn file phải dùng `pathlib.Path` hoặc chuẩn hóa dấu gạch chéo để tương thích môi trường Windows.
+5. **Windows Compatibility**: File paths must use `pathlib.Path` or normalized forward slashes for reliable Windows cross-version support.

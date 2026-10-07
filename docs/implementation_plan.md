@@ -1,87 +1,107 @@
-# Kế Hoạch Triển Khai: Tool Tự Động Lồng Tiếng AI (Dubbing) & Tạo Phụ Đề Cho Video TikTok
+# Detailed Implementation Plan & Phase Checklists: AutoSub Dubbing Studio
 
-Tài liệu kế hoạch phát triển toàn trình công cụ tự động lồng tiếng (AI Dubbing) và tạo phụ đề video ngắn từ TikTok/Douyin (tập trung chuyển đổi từ tiếng Trung sang tiếng Việt), tích hợp LLM Gemma (chuẩn OpenAI-compatible), faster-whisper và edge-tts.
-
----
-
-## 1. Mục Tiêu Dự Án
-
-* Tải video chất lượng cao từ TikTok/Douyin không dính watermark bằng `yt-dlp`.
-* Nhận diện chính xác câu thoại và mốc thời gian (Speech-to-Text) bằng `faster-whisper` (chạy mượt trên CPU với INT8).
-* Dịch thuật thoát ý, căn chỉnh độ dài câu thoại phù hợp với phong cách video ngắn bằng mô hình ngôn ngữ lớn (hỗ trợ endpoint OpenAI-compatible như Gemma 26B, Gemma 3 4B, hoặc Ollama local).
-* Tạo giọng lồng tiếng tiếng Việt tự nhiên miễn phí bằng `edge-tts`.
-* Căn chỉnh tốc độ giọng đọc (`atempo`) để khớp thời lượng câu gốc và hòa âm (audio ducking giảm 85% tiếng gốc để lót nền).
-* Đóng gói video hoàn thiện (kèm tùy chọn burn phụ đề TikTok) và xây dựng giao diện Desktop Studio (PySide6) phong cách AutoDub Studio.
+An end-to-end development roadmap and phase-by-phase checklist for AutoSub Dubbing Studio, featuring automated video downloads, Speech-to-Text transcription, LLM translation, AI voice dubbing, and a PySide6 Desktop Studio interface.
 
 ---
 
-## 2. Kiến Trúc Pipeline Xử Lý
+## 📋 Roadmap & Phase Checklists
 
-```
-[TikTok URL]
-     │
-     ▼
-[downloader.py: Tải video & trích xuất audio WAV 16kHz]
-     │
-     ▼
-[transcriber.py: faster-whisper nhận diện text Trung + timestamps]
-     │
-     ▼
-[translator.py: LLM (OpenAI-compatible) dịch câu thoại ngắn gọn sang tiếng Việt]
-     │
-     ▼
-[tts_engine.py: edge-tts tạo audio tiếng Việt & atempo nén/giãn tốc độ]
-     │
-     ▼
-[audio_mixer.py: Audio ducking tiếng gốc 15% + tiếng lồng 100% + render video]
-     │
-     ▼
-[Video TikTok hoàn chỉnh đã lồng tiếng Việt]
+```mermaid
+flowchart LR
+    P1["Phase 1: Environment & Config"] --> P2["Phase 2: Downloader & Audio"]
+    P2 --> P3["Phase 3: Speech-to-Text"]
+    P3 --> P4["Phase 4: LLM Translator"]
+    P4 --> P5["Phase 5: TTS & Speed Sync"]
+    P5 --> P6["Phase 6: Audio Mixer & Pipeline"]
+    P6 --> P7["Phase 7: Desktop GUI PySide6"]
+    P7 --> P8["Phase 8: Test & Build .exe"]
 ```
 
 ---
 
-## 3. Các Giai Đoạn Triển Khai (Phases)
-
-### Giai đoạn 1: Khởi tạo môi trường & File cấu hình
-- Tạo `.env.example`, `config.py` đọc biến môi trường.
-- Tạo `requirements.txt` với các phiên bản ổn định (kèm PySide6).
-- Hướng dẫn kiểm tra và cấu hình FFmpeg cho môi trường Windows.
-
-### Giai đoạn 2: Module Tải Video & Audio (`downloader.py`, `audio_extractor.py`)
-- Viết hàm dùng `yt-dlp` tải video MP4 tốt nhất không watermark.
-- Trích xuất file audio WAV chuẩn mono 16kHz phục vụ Whisper.
-
-### Giai đoạn 3: Module Nhận Diện Giọng Nói (`transcriber.py`)
-- Tích hợp `faster-whisper` (model `base` hoặc `small`).
-- Chạy trên CPU với `compute_type="int8"` để tiết kiệm RAM.
-- Trả về danh sách phân đoạn: `[{start, end, text}]`.
-
-### Giai đoạn 4: Module Dịch Thuật LLM (`translator.py`)
-- Kết nối endpoint chuẩn OpenAI SDK (cấu hình qua biến môi trường `LLM_BASE_URL`).
-- Prompt kỹ thuật yêu cầu dịch ngắn gọn, tương đương số âm tiết gốc, xuất JSON schema chuẩn.
-
-### Giai đoạn 5: Module Lồng Tiếng AI & Đồng Bộ Tốc Độ (`tts_engine.py`)
-- Dùng `edge-tts` sinh giọng Nam (`vi-VN-NamMinhNeural`) hoặc Nữ (`vi-VN-HoaiMyNeural`).
-- Tính toán hệ số `speed_factor = vi_duration / zh_duration`.
-- Dùng filter FFmpeg `atempo` điều chỉnh tốc độ đọc trong giới hạn an toàn [0.85x - 1.25x].
-
-### Giai đoạn 6: Module Hòa Âm & Ghép Video (`audio_mixer.py`)
-- Giảm âm lượng âm thanh gốc xuống 10-15%.
-- Ghép các file thoại tiếng Việt vào đúng timeline mốc thời gian.
-- Trộn (amix) 2 kênh âm thanh và đóng vào video gốc bằng FFmpeg.
-- Tùy chọn sinh file phụ đề `.ass` để hiển thị chữ cùng lúc.
-
-### Giai đoạn 7: Xây Dựng Pipeline Tổng & Giao Diện Desktop Studio (`gui.py`)
-- Viết file `pipeline.py` chạy độc lập qua CLI.
-- Viết giao diện Desktop Native `gui.py` bằng PySide6 chuẩn phong cách AutoDub Studio: hàng đợi video, cấu hình đa cột, điều khiển đa luồng QThread và khung console log thời gian thực.
-- Cấu hình đóng gói ứng dụng thành file `.exe` bằng PyInstaller.
+### Phase 1: Environment & Foundational Configuration
+- [x] Create project dependencies file `requirements.txt`
+- [x] Create sample environment configuration `.env.example`
+- [x] Create centralized configuration manager `config.py` with automatic directory creation (`temp/`, `output/`)
+- [x] Integrate and configure pre-bundled portable FFmpeg binary in `bin/ffmpeg.exe`
+- [x] Install base Python dependencies (`pip install -r requirements.txt`)
 
 ---
 
-## 4. Kế Hoạch Xác Minh (Verification Criteria)
+### Phase 2: Video Downloader & Audio Extraction Module
+*Objective: Download watermark-free videos from TikTok/Douyin and extract 16kHz mono WAV audio.*
+- [x] Create core package initialization `core/__init__.py`
+- [x] Implement `core/downloader.py`:
+  - Support high-quality video downloads via `yt-dlp`.
+  - Handle local video files and network URLs seamlessly.
+  - Implement download progress callback hooks.
+- [x] Implement `core/audio_extractor.py`:
+  - Extract audio into standardized 16kHz mono WAV format for Whisper.
+  - Automatically detect portable FFmpeg binary in `bin/ffmpeg.exe`.
+- [x] **Verification**: Unit tests in `tests/test_phase2.py` (PASSED).
 
-1. **Kiểm tra môi trường**: Lệnh `ffmpeg -version` và import các thư viện cốt lõi thành công.
-2. **Kiểm tra kết nối LLM**: Gửi request mẫu tới endpoint LLM đã cấu hình và nhận về kết quả JSON dịch thuật hợp lệ.
-3. **Kiểm tra âm thanh TTS**: File sinh ra từ `edge-tts` phát rõ ràng, không bị ngắt tiếng.
-4. **Kiểm tra đồng bộ video**: Video xuất ra có tiếng lồng tiếng Việt khớp hình, nhạc nền không bị lấn át giọng nói.
+---
+
+### Phase 3: Speech-to-Text (STT) Module
+*Objective: Transcribe dialogues and extract precise start/end timestamps using faster-whisper.*
+- [x] Implement `core/transcriber.py`:
+  - Initialize `faster-whisper` with CPU INT8 quantization (`compute_type="int8"`).
+  - Implement in-memory model caching to prevent redundant model reloads.
+  - Support word-level timestamps (`word_timestamps=True`) for animated subtitles.
+  - Integrated Voice Activity Detection (VAD) filter to eliminate silence.
+- [x] **Verification**: Unit tests in `tests/test_phase3.py` (PASSED).
+
+---
+
+### Phase 4: Contextual LLM Translation Module
+*Objective: Translate dialogues with colloquial phrasing and syllable constraints suitable for video pacing.*
+- [x] Implement `core/translator.py`:
+  - Connect to OpenAI-compatible endpoints (`LLM_BASE_URL` & `LLM_MODEL`).
+  - Specially designed system prompt for video dubbing: concise sentence length, natural social media style, and strict JSON formatting.
+  - Robust JSON parser with fallback mechanism.
+- [x] **Verification**: Unit tests in `tests/test_phase4.py` (PASSED).
+
+---
+
+### Phase 5: AI Voice Dubbing & Speed Synchronization Module
+*Objective: Synthesize natural voices with edge-tts and dynamically align speech tempo using FFmpeg atempo.*
+- [x] Implement `core/tts_engine.py`:
+  - Asynchronous voice generation via `edge-tts` (NamMinh and HoaiMy neural voices).
+  - High-precision audio duration probe (`get_audio_duration`).
+  - Dynamic tempo alignment filter `atempo` clamped between `0.85x` and `1.30x` to preserve pitch.
+  - Batch segment processing function `process_dubbing_segments`.
+- [x] **Verification**: Unit tests in `tests/test_phase5.py` (PASSED, live speech synthesis verified).
+
+---
+
+### Phase 6: Audio Mixing & Video Packaging (Audio Mixer & Pipeline)
+*Objective: Smart Audio Ducking (10% background volume, 100% dubbing audio) and video rendering.*
+- [x] Implement `core/audio_mixer.py`:
+  - Generate TikTok-style `.ass` subtitle files (`TikTokStyle`: bold font, black outline, bottom-center alignment).
+  - Audio Ducking: lowers original audio volume and overlays dubbed segments at precise millisecond positions using `pydub`.
+  - Final video rendering with FFmpeg (`-c:v libx264` with subtitles, or fast `-c:v copy`).
+- [x] Implement `pipeline.py`:
+  - Full end-to-end orchestrator connecting all 6 steps.
+  - Command Line Interface (CLI) support.
+- [x] **Verification**: Unit tests in `tests/test_phase6.py` (PASSED).
+
+---
+
+### Phase 7: PySide6 Native Desktop Studio Interface
+*Objective: Build a native Windows desktop GUI matching the AutoDub Studio design.*
+- [x] Implement `gui.py` using PySide6:
+  - Tab Widget: Video Dubbing, Subtitle Translation, Model Manager.
+  - Batch Video Queue (`QTableWidget`) with toolbar (+ Paste Links, + Add Videos, Remove Selected).
+  - Two-column configuration grid (Original Subtitles, LLM Translation, Dubbing, Export settings).
+  - Control bar: Start, Stop, Open Result Folder, smooth green `QProgressBar`.
+  - Real-time dark terminal console log viewer (`QTextEdit`).
+  - Multithreaded `DubbingWorker(QThread)` ensuring a responsive, freeze-free UI.
+- [x] **Verification**: Unit tests in `tests/test_phase7.py` (PASSED).
+
+---
+
+### Phase 8: Comprehensive Testing & Standalone Executable (.exe)
+- [x] Automated test runner executing all tests: `tests/run_all_tests.py` (6/6 tests PASSED).
+- [x] Standalone Windows executable packager: `build_exe.py` (PyInstaller script bundling portable FFmpeg).
+- [x] 1-Click launcher script for Windows: `run_gui.bat`.
+- [x] Documentation and internationalization to English for global distribution.

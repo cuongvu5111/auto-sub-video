@@ -1,95 +1,91 @@
-# Tool Tự Động Lồng Tiếng AI (Dubbing) & Tạo Phụ Đề TikTok
+# AutoSub Dubbing Studio - AI Video Dubbing & Subtitles
 
-Công cụ tự động tải video ngắn từ TikTok/Douyin, nhận diện giọng nói (Speech-to-Text), dịch thuật ngữ cảnh bằng mô hình LLM **Gemma 26B-A4B-it**, tạo giọng lồng tiếng tiếng Việt tự nhiên (**Microsoft Edge TTS**), đồng bộ thời gian và đóng gói thành video hoàn chỉnh kèm phụ đề.
-
----
-
-## ✨ Tính Năng Nổi Bật
-
-* 🚀 **Tải video không Watermark**: Hỗ trợ TikTok và Douyin với độ phân giải cao nhất qua `yt-dlp`.
-* 🎙️ **Nhận diện giọng nói chính xác**: Sử dụng `faster-whisper` tối ưu chạy mượt mà ngay trên CPU với chế độ INT8.
-* 🧠 **Dịch thuật thông minh với Gemma 26B**: Dịch thoát ý từ tiếng Trung sang tiếng Việt, phù hợp văn phong ngắn gọn, dí dỏm của video TikTok.
-* 🗣️ **Lồng tiếng tự nhiên miễn phí (AI Dubbing)**: Tích hợp `edge-tts` với giọng Nam/Nữ truyền cảm, không giới hạn ký tự và không tốn phí API.
-* ⏱️ **Tự động căn chỉnh tốc độ (Speed Sync)**: Điều chỉnh tốc độ giọng đọc linh hoạt (`0.85x` - `1.25x`) để khớp đúng thời lượng câu gốc.
-* 🎧 **Hòa âm thông minh (Audio Ducking)**: Tự động hạ âm lượng tiếng gốc xuống 10-15% làm nền (giữ tiếng cười, nhạc nền), đè giọng lồng tiếng Việt nổi bật lên trên.
-* 🖥️ **Giao diện Desktop Studio**: Viết bằng `PySide6` (Qt), phong cách AutoDub Studio với hàng đợi xử lý hàng loạt, tiến trình mượt mà và khung console log thời gian thực.
+An all-in-one automated desktop suite for downloading short videos from TikTok, Douyin, and other platforms, performing precise Speech-to-Text, contextual LLM translation, natural AI voice dubbing (via Microsoft Edge Neural TTS), audio tempo synchronization, smart background ducking, and video rendering with animated subtitles.
 
 ---
 
-## 🛠️ Yêu Cầu Môi Trường
+## ✨ Key Features
 
-* **Hệ điều hành**: Windows 10/11
-* **Python**: Phiên bản 3.10 trở lên
-* **FFmpeg**: Đã được cài đặt và thêm vào biến môi trường PATH hệ thống
-
-### Hướng dẫn cài nhanh FFmpeg trên Windows:
-Mở PowerShell (Run as Administrator) và chạy lệnh:
-```powershell
-winget install Gyan.FFmpeg
-```
-*Sau khi cài xong, khởi động lại terminal để nhận lệnh `ffmpeg`.*
+* 🚀 **Watermark-Free Video Downloads**: High-resolution video extraction from TikTok and Douyin powered by `yt-dlp`.
+* 🎙️ **High-Accuracy Speech-to-Text**: Powered by `faster-whisper` (CTranslate2) with INT8 quantization, optimized for fast CPU processing without a dedicated GPU.
+* 🧠 **Smart LLM Translation**: Leverages instruction-tuned models (Gemma, GPT-4o-mini, Ollama) with syllable-count constraints tailored for fast-paced video dubbing.
+* 🗣️ **Natural AI Voice Dubbing**: Free, unlimited neural voice synthesis via `edge-tts` with expressive Vietnamese and multi-language voices.
+* ⏱️ **Audio Speed Synchronization**: Dynamic tempo adjustments (`0.85x` - `1.30x`) using FFmpeg's `atempo` filter to match original video lip movements without pitch distortion.
+* 🎧 **Intelligent Audio Ducking**: Drops original background audio volume to 10% to preserve laughter, music, and ambient noise while elevating the dubbed voice track.
+* 🖥️ **Native Desktop Studio**: Built with `PySide6` (Qt), featuring a batch processing queue, two-column settings grid, progress tracking, and a real-time console log viewer.
 
 ---
 
-## 🚀 Hướng Dẫn Cài Đặt & Sử Dụng
+## 🛠️ System Requirements
 
-### 1. Cài đặt các thư viện phụ thuộc
+* **Operating System**: Windows 10 or Windows 11 (64-bit)
+* **Python**: Version 3.10 or higher
+* **FFmpeg**: Pre-bundled portable binary included in `bin/ffmpeg.exe` (no separate system installation required).
+
+---
+
+## 🚀 Installation & Quick Start
+
+### 1. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Thiết lập cấu hình môi trường
-Tạo file `.env` từ `.env.example`:
+### 2. Configure Environment
+Create your `.env` configuration file from the template:
 ```bash
 cp .env.example .env
 ```
-Mở file `.env` và điền cấu hình API của mô hình ngôn ngữ (chuẩn OpenAI-compatible, hỗ trợ Ollama local hoặc bất kỳ gateway nào):
+Edit `.env` to configure your preferred LLM provider (Ollama local, OpenAI, Groq, or custom proxy):
 ```env
 LLM_BASE_URL=http://localhost:11434/v1
 LLM_MODEL=gemma3:4b
 LLM_API_KEY=your_api_key_here
 ```
 
-### 3. Khởi chạy ứng dụng
+### 3. Launch Application
 
-**Cách 1: Khởi chạy 1-click trên Windows (Tiện nhất)**
-Click đúp chuột vào tệp:
+**Option A: 1-Click Windows Launcher (Recommended)**
+Double-click the launcher script:
 ```text
 run_gui.bat
 ```
 
-**Cách 2: Chạy lệnh Python**
+**Option B: Python Desktop GUI**
 ```bash
 python gui.py
 ```
 
-**Cách 3: Chạy bằng dòng lệnh CLI**
+**Option C: Command Line Interface (CLI)**
 ```bash
 python pipeline.py --source "https://www.tiktok.com/@user/video/..." --voice "vi-VN-NamMinhNeural"
 ```
 
 ---
 
-## 📦 Đóng Gói Thành Ứng Dụng Desktop (.exe)
+## 📦 Standalone Executable Packaging (.exe)
 
-Để đóng gói toàn bộ ứng dụng thành tệp thực thi Windows độc lập (kèm sẵn FFmpeg):
+Package the entire application into a standalone Windows executable (bundled with portable FFmpeg):
 ```bash
 python build_exe.py
 ```
-Sau khi chạy xong, ứng dụng hoàn chỉnh nằm tại:
-`dist/AutoDubStudio/AutoDubStudio.exe` (chạy trực tiếp không cần cài Python).
+The compiled distribution will be created at:
+`dist/AutoDubStudio/AutoDubStudio.exe` (runs on any Windows PC without Python installed).
 
 ---
 
-## 🧪 Kiểm Thử Toàn Trình (Testing)
+## 🧪 Comprehensive Test Suite
 
-Chạy toàn bộ 6 bài kiểm thử đơn vị từ Phase 2 đến Phase 7:
+Run the full end-to-end automated test suite (Phases 2 through 7):
 ```bash
 python tests/run_all_tests.py
 ```
 
 ---
 
-## 📂 Cấu Trúc Mã Nguồn
+## 📂 Architecture & Documentation
 
-Chi tiết xem tại tệp [`PROJECT.md`](file:///d:/www/auto-sub-video/PROJECT.md) và kế hoạch triển khai tại [`docs/implementation_plan.md`](file:///d:/www/auto-sub-video/docs/implementation_plan.md).
+For in-depth architecture details and implementation roadmaps, consult:
+* [`PROJECT.md`](file:///d:/www/auto-sub-video/PROJECT.md): Full technical specifications, tech stack, and conventions.
+* [`AGENTS.md`](file:///d:/www/auto-sub-video/AGENTS.md): Development principles and coding agent guidelines.
+* [`docs/implementation_plan.md`](file:///d:/www/auto-sub-video/docs/implementation_plan.md): 8-Phase implementation roadmap and checklist.
