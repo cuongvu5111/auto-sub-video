@@ -22,7 +22,7 @@ Tiêu chí tiên quyết: **Tối ưu chi phí (100% miễn phí / mã nguồn m
 * **Xử lý Audio/Video**: `FFmpeg` (kết hợp `pydub` và lệnh subprocess native)
   * Bộ lọc `atempo`: Điều chỉnh tốc độ giọng đọc ăn khớp thời lượng video gốc.
   * Bộ lọc `amix` & `volume`: Audio Ducking (giảm âm lượng tiếng gốc xuống 10-15%, đè tiếng lồng tiếng Việt 100%).
-* **Giao diện Người dùng**: `Streamlit` (giao diện Web trực quan) hoặc Python CLI.
+* **Giao diện Người dùng**: `PySide6` (ứng dụng Desktop Native đa luồng kiểu AutoDub Studio cho Windows) kèm CLI fallback.
 
 ---
 
@@ -42,7 +42,7 @@ auto-sub-video/
 │   ├── tts_engine.py         # Module sinh giọng đọc tiếng Việt & căn chỉnh tốc độ (edge-tts + atempo)
 │   └── audio_mixer.py        # Module hòa âm (ducking audio gốc + lồng tiếng) & xuất video (FFmpeg)
 ├── pipeline.py               # Điều phối toàn bộ luồng xử lý từ URL -> Video kết quả
-├── app.py                    # Giao diện WebUI Streamlit
+├── gui.py                    # Giao diện Desktop Native (PySide6) kiểu AutoDub Studio
 ├── docs/                     # Tài liệu kế hoạch & hướng dẫn kiến trúc
 │   └── implementation_plan.md
 └── temp/                     # Thư mục lưu trữ file tạm (video tải về, audio cắt lẻ, cache)

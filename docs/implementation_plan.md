@@ -11,7 +11,7 @@ Tài liệu kế hoạch phát triển toàn trình công cụ tự động lồ
 * Dịch thuật thoát ý, căn chỉnh độ dài câu thoại phù hợp với phong cách video ngắn bằng mô hình ngôn ngữ lớn (hỗ trợ endpoint OpenAI-compatible như Gemma 26B, Gemma 3 4B, hoặc Ollama local).
 * Tạo giọng lồng tiếng tiếng Việt tự nhiên miễn phí bằng `edge-tts`.
 * Căn chỉnh tốc độ giọng đọc (`atempo`) để khớp thời lượng câu gốc và hòa âm (audio ducking giảm 85% tiếng gốc để lót nền).
-* Đóng gói video hoàn thiện (kèm tùy chọn burn phụ đề TikTok) và giao diện trực quan với `Streamlit`.
+* Đóng gói video hoàn thiện (kèm tùy chọn burn phụ đề TikTok) và xây dựng giao diện Desktop Studio (PySide6) phong cách AutoDub Studio.
 
 ---
 
@@ -45,7 +45,7 @@ Tài liệu kế hoạch phát triển toàn trình công cụ tự động lồ
 
 ### Giai đoạn 1: Khởi tạo môi trường & File cấu hình
 - Tạo `.env.example`, `config.py` đọc biến môi trường.
-- Tạo `requirements.txt` với các phiên bản ổn định.
+- Tạo `requirements.txt` với các phiên bản ổn định (kèm PySide6).
 - Hướng dẫn kiểm tra và cấu hình FFmpeg cho môi trường Windows.
 
 ### Giai đoạn 2: Module Tải Video & Audio (`downloader.py`, `audio_extractor.py`)
@@ -72,9 +72,10 @@ Tài liệu kế hoạch phát triển toàn trình công cụ tự động lồ
 - Trộn (amix) 2 kênh âm thanh và đóng vào video gốc bằng FFmpeg.
 - Tùy chọn sinh file phụ đề `.ass` để hiển thị chữ cùng lúc.
 
-### Giai đoạn 7: Xây Dựng Pipeline Tổng & Giao Diện Web (`app.py`)
+### Giai đoạn 7: Xây Dựng Pipeline Tổng & Giao Diện Desktop Studio (`gui.py`)
 - Viết file `pipeline.py` chạy độc lập qua CLI.
-- Viết giao diện Web `Streamlit` thân thiện: nhập link, chọn giọng đọc, xem preview và tải video.
+- Viết giao diện Desktop Native `gui.py` bằng PySide6 chuẩn phong cách AutoDub Studio: hàng đợi video, cấu hình đa cột, điều khiển đa luồng QThread và khung console log thời gian thực.
+- Cấu hình đóng gói ứng dụng thành file `.exe` bằng PyInstaller.
 
 ---
 

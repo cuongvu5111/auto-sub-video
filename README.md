@@ -12,7 +12,7 @@ Công cụ tự động tải video ngắn từ TikTok/Douyin, nhận diện gi�
 * 🗣️ **Lồng tiếng tự nhiên miễn phí (AI Dubbing)**: Tích hợp `edge-tts` với giọng Nam/Nữ truyền cảm, không giới hạn ký tự và không tốn phí API.
 * ⏱️ **Tự động căn chỉnh tốc độ (Speed Sync)**: Điều chỉnh tốc độ giọng đọc linh hoạt (`0.85x` - `1.25x`) để khớp đúng thời lượng câu gốc.
 * 🎧 **Hòa âm thông minh (Audio Ducking)**: Tự động hạ âm lượng tiếng gốc xuống 10-15% làm nền (giữ tiếng cười, nhạc nền), đè giọng lồng tiếng Việt nổi bật lên trên.
-* 🖥️ **Giao diện Web trực quan**: Viết bằng `Streamlit`, thao tác đơn giản chỉ cần dán link và bấm bắt đầu.
+* 🖥️ **Giao diện Desktop Studio**: Viết bằng `PySide6` (Qt), phong cách AutoDub Studio với hàng đợi xử lý hàng loạt, tiến trình mượt mà và khung console log thời gian thực.
 
 ---
 
@@ -51,9 +51,9 @@ LLM_API_KEY=your_api_key_here
 ```
 
 ### 3. Khởi chạy ứng dụng
-Chạy giao diện Web:
+Chạy giao diện Desktop:
 ```bash
-streamlit run app.py
+python gui.py
 ```
 Hoặc chạy dòng lệnh CLI:
 ```bash

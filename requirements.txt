@@ -1,0 +1,27 @@
+# ============================================================
+# Danh sách thư viện phụ thuộc: AutoSub Dubbing Studio
+# ============================================================
+
+# Tải video từ TikTok/Douyin không dính watermark
+yt-dlp>=2024.8.6
+
+# Nhận diện giọng nói siêu nhanh trên CPU (CTranslate2)
+faster-whisper>=1.0.3
+
+# Giọng đọc AI tự nhiên chất lượng cao từ Microsoft Edge (miễn phí)
+edge-tts>=6.1.12
+
+# Xử lý cắt ghép, timeline và đo thời lượng âm thanh
+pydub>=0.25.1
+
+# Kết nối mô hình ngôn ngữ (OpenAI-compatible endpoint)
+openai>=1.40.0
+
+# Giao diện Desktop Native Windows (Qt for Python)
+PySide6>=6.7.0
+
+# Đọc cấu hình biến môi trường từ file .env
+python-dotenv>=1.0.1
+
+# Thư viện HTTP tiện ích
+requests>=2.32.0
