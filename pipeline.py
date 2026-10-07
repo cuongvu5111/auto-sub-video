@@ -34,6 +34,7 @@ def run_pipeline(
     genre: str = "Daily Life / Social Media",
     custom_terms: str = "",
     subtitle_options: Optional[Dict[str, Any]] = None,
+    watermark_options: Optional[Dict[str, Any]] = None,
     output_dir: Optional[Path] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None
 ) -> Path:
@@ -47,6 +48,8 @@ def run_pipeline(
         burn_subtitles: True nếu muốn nung chữ phụ đề vào khung hình video.
         genre: Thể loại nội dung phục vụ LLM dịch thuật.
         custom_terms: Quy tắc từ khóa hoặc tên riêng cố định.
+        subtitle_options: Tùy chỉnh màu sắc, cỡ chữ, căn chỉnh vị trí (margin_v, alignment).
+        watermark_options: Tùy chỉnh Text Watermark (giữa video) và Logo Watermark (ảnh, opacity).
         output_dir: Thư mục lưu video thành phẩm.
         progress_callback: Hàm nhận (thông điệp, phần trăm tiến độ tổng thể).
 
@@ -115,13 +118,25 @@ def run_pipeline(
         ducking_volume=ducking_volume
     )
 
-    # 6b. Generate ASS subtitle file if requested
+    # 6b. Generate ASS subtitle file if requested (or if text watermark enabled)
     ass_file = None
-    if burn_subtitles:
+    sub_opts = subtitle_options or {}
+    wm_opts = watermark_options or {}
+
+    text_wm_config = None
+    if wm_opts.get("text_enabled", False) and wm_opts.get("text", "").strip():
+        text_wm_config = {
+            "enabled": True,
+            "text": wm_opts.get("text", "").strip(),
+            "timing_mode": wm_opts.get("text_timing", "mid_video"),
+            "position": wm_opts.get("text_position", "center"),
+            "font_size": wm_opts.get("text_font_size", 22)
+        }
+
+    if burn_subtitles or text_wm_config:
         ass_file = Config.TEMP_DIR / f"{video_path.stem}_sub.ass"
-        sub_opts = subtitle_options or {}
         generate_ass_file(
-            dubbed_segments,
+            dubbed_segments if burn_subtitles else [],
             ass_file,
             font_name=sub_opts.get("font_name", "Arial"),
             font_size=sub_opts.get("font_size", 24),
@@ -131,7 +146,10 @@ def run_pipeline(
             border_style=sub_opts.get("border_style", 3),
             outline_width=sub_opts.get("outline_width", 6),
             shadow_width=sub_opts.get("shadow_width", 0),
-            margin_v=sub_opts.get("margin_v", 40)
+            margin_v=sub_opts.get("margin_v", 40),
+            alignment=sub_opts.get("alignment", 2),
+            box_padding=sub_opts.get("box_padding"),
+            text_watermark=text_wm_config
         )
 
     # 6c. Render finalized video
@@ -143,6 +161,7 @@ def run_pipeline(
         mixed_audio_file,
         final_video_path,
         ass_subtitle_path=ass_file,
+        watermark_options=wm_opts,
         progress_callback=lambda m, p: report(f"Step 6/6: {m}", 90.0 + p * 0.10)
     )
 

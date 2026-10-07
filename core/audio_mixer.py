@@ -79,18 +79,50 @@ def generate_ass_file(
     border_style: int = 3,               # 3: Hộp nền (Box/Badge), 1: Viền đổ bóng (Outline)
     outline_width: int = 6,              # Khoảng đệm hộp khi border_style=3, hoặc độ dày viền khi border_style=1
     shadow_width: int = 0,               # Độ đổ bóng
-    margin_v: int = 40                   # Khoảng cách từ đáy video (pixel)
+    margin_v: int = 40,                  # Khoảng cách từ đáy video (pixel)
+    alignment: int = 2,                  # Căn chỉnh vị trí (2: Dưới, 5: Giữa, 8: Trên)
+    box_padding: Optional[int] = None,   # Khoảng đệm hộp (nếu có sẽ áp dụng vào outline_width)
+    total_duration: Optional[float] = None, # Tổng thời lượng video (giây)
+    text_watermark: Optional[Dict[str, Any]] = None # Cấu hình chèn text watermark
 ) -> Path:
     """
     Sinh file phụ đề định dạng ASS (Advanced SubStation Alpha) với kiểu chữ nổi bật cho TikTok.
-    Hỗ trợ BorderStyle 3 (hộp nền chữ nhật bao quanh chữ) hoặc BorderStyle 1 (viền bóng truyền thống).
+    Hỗ trợ:
+    - BorderStyle 3 (hộp nền bao quanh chữ) hoặc BorderStyle 1 (viền bóng truyền thống).
+    - Tùy chỉnh vị trí alignment (2: Dưới, 5: Giữa, 8: Trên) và margin_v để che phụ đề cũ.
+    - Chèn Text Watermark (dòng chữ bản quyền giữa video hoặc toàn video).
     """
     output_ass_path = Path(output_ass_path).resolve()
     output_ass_path.parent.mkdir(parents=True, exist_ok=True)
 
+    if box_padding is not None and box_padding >= 0:
+        outline_width = box_padding
+
     ass_primary = hex_to_ass_color(primary_color, default="&H00000000")
     ass_outline = hex_to_ass_color(outline_color, default="&H00FFFFFF")
     ass_back = hex_to_ass_color(back_color, default="&H00FFFFFF")
+
+    styles_section = f"""[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: TikTokStyle,{font_name},{font_size},{ass_primary},&H000000FF,{ass_outline},{ass_back},-1,0,0,0,100,100,0,0,{border_style},{outline_width},{shadow_width},{alignment},20,20,{margin_v},1
+"""
+
+    # Thêm style riêng cho Text Watermark nếu được kích hoạt
+    has_text_wm = bool(text_watermark and text_watermark.get("enabled", False) and text_watermark.get("text", "").strip())
+    if has_text_wm:
+        wm_pos = str(text_watermark.get("position", "center")).lower()
+        if "top" in wm_pos:
+            wm_align = 8
+            wm_margin_v = 45
+        elif "bottom" in wm_pos:
+            wm_align = 2
+            wm_margin_v = 45
+        else:
+            wm_align = 5
+            wm_margin_v = 0
+
+        wm_font_size = int(text_watermark.get("font_size", 22))
+        styles_section += f"Style: WatermarkStyle,Arial,{wm_font_size},&H00FFFFFF,&H000000FF,&H00000000,&H60000000,-1,0,0,0,100,100,0,0,3,5,0,{wm_align},30,30,{wm_margin_v},1\n"
 
     header = f"""[Script Info]
 Title: AutoSub TikTok Dubbing
@@ -98,15 +130,16 @@ ScriptType: v4.00+
 WrapStyle: 0
 ScaledBorderAndShadow: yes
 YCbCr Matrix: None
+PlayResX: 720
+PlayResY: 1280
 
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: TikTokStyle,{font_name},{font_size},{ass_primary},&H000000FF,{ass_outline},{ass_back},-1,0,0,0,100,100,0,0,{border_style},{outline_width},{shadow_width},2,20,20,{margin_v},1
-
+{styles_section}
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = [header]
+
+    # 1. Thêm các dòng phụ đề thoại (Layer 0)
     for seg in segments:
         text = seg.get("translated_text", "").strip() or seg.get("text", "").strip()
         if not text:
@@ -114,6 +147,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start_ts = format_ass_timestamp(seg.get("start", 0.0))
         end_ts = format_ass_timestamp(seg.get("end", 0.0))
         lines.append(f"Dialogue: 0,{start_ts},{end_ts},TikTokStyle,,0,0,0,,{text}\n")
+
+    # 2. Thêm dòng Text Watermark nếu có (Layer 1)
+    if has_text_wm:
+        wm_text = text_watermark.get("text", "").strip()
+        timing_mode = text_watermark.get("timing_mode", "mid_video")
+        max_seg_end = max((seg.get("end", 0.0) for seg in segments), default=0.0)
+        dur = total_duration if (total_duration and total_duration > 0) else max(max_seg_end, 10.0)
+
+        if timing_mode == "full":
+            wm_start = 0.0
+            wm_end = dur
+        else:
+            # Mặc định: Hiển thị 6 giây ở mốc giữa video
+            wm_len = float(text_watermark.get("duration", 6.0))
+            mid = dur / 2.0
+            wm_start = max(0.0, mid - (wm_len / 2.0))
+            wm_end = min(dur, wm_start + wm_len)
+
+        start_ts = format_ass_timestamp(wm_start)
+        end_ts = format_ass_timestamp(wm_end)
+        lines.append(f"Dialogue: 1,{start_ts},{end_ts},WatermarkStyle,,0,0,0,,{wm_text}\n")
 
     with open(output_ass_path, "w", encoding="utf-8") as f:
         f.writelines(lines)
@@ -264,12 +318,14 @@ def render_final_video(
     mixed_audio_path: Path,
     output_video_path: Path,
     ass_subtitle_path: Optional[Path] = None,
+    watermark_options: Optional[Dict[str, Any]] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None
 ) -> Path:
     """
     Đóng gói video hoàn thiện bằng FFmpeg:
     - Thay thế track âm thanh gốc bằng track âm thanh đã hòa âm.
     - Nung phụ đề .ass trực tiếp vào khung hình (nếu có yêu cầu).
+    - Chèn Logo Watermark (vị trí tùy biến, độ mờ Opacity, tự động co tỉ lệ).
     """
     orig_video = Path(original_video_path).resolve()
     mixed_audio = Path(mixed_audio_path).resolve()
@@ -286,18 +342,68 @@ def render_final_video(
     if progress_callback:
         progress_callback("Đang tiến hành ghép âm thanh và xuất video thành phẩm...", 70.0)
 
-    # Trường hợp 1: Có nung phụ đề vào hình
-    if ass_subtitle_path and Path(ass_subtitle_path).exists():
-        ass_path_str = str(Path(ass_subtitle_path).resolve()).replace("\\", "/")
-        # Trên Windows, ký tự : trong ổ đĩa (D:/) cần escape thành D\:/ trong filter ass
-        ass_path_str = ass_path_str.replace(":", "\\:")
+    has_sub = bool(ass_subtitle_path and Path(ass_subtitle_path).exists())
 
+    # Kiểm tra cấu hình Logo Watermark
+    has_logo = False
+    logo_path = None
+    if watermark_options and watermark_options.get("logo_enabled", False):
+        candidate_path = watermark_options.get("logo_path")
+        if candidate_path and Path(candidate_path).exists():
+            has_logo = True
+            logo_path = Path(candidate_path).resolve()
+
+    if has_sub or has_logo:
+        # Trường hợp cần xử lý hình ảnh qua filter_complex và mã hóa lại libx264
         cmd = [
             ffmpeg_bin,
             "-y",
             "-i", str(orig_video),
-            "-i", str(mixed_audio),
-            "-filter_complex", f"[0:v]ass='{ass_path_str}'[v]",
+            "-i", str(mixed_audio)
+        ]
+
+        filter_chains = []
+        curr_v = "0:v"
+
+        if has_logo:
+            cmd.extend(["-i", str(logo_path)])
+            # logo stream là luồng video thứ 3 (index 2:v)
+            opacity = float(watermark_options.get("logo_opacity", 0.8))
+            opacity = max(0.05, min(1.0, opacity))
+            max_w = int(watermark_options.get("logo_max_width", 160))
+            max_w = max(40, min(800, max_w))
+
+            pos_key = str(watermark_options.get("logo_position", "top-right")).lower().replace(" ", "-")
+            pos_expr_map = {
+                "top-right": "main_w-overlay_w-24:24",
+                "top-left": "24:24",
+                "bottom-right": "main_w-overlay_w-24:main_h-overlay_h-24",
+                "bottom-left": "24:main_h-overlay_h-24",
+                "center": "(main_w-overlay_w)/2:(main_h-overlay_h)/2"
+            }
+            pos_expr = pos_expr_map.get(pos_key, "main_w-overlay_w-24:24")
+
+            filter_chains.append(f"[2:v]scale={max_w}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[logo]")
+            filter_chains.append(f"[{curr_v}][logo]overlay={pos_expr}[v_logo]")
+            curr_v = "v_logo"
+
+        if has_sub:
+            ass_path_str = str(Path(ass_subtitle_path).resolve()).replace("\\", "/")
+            # Trên Windows, ký tự : trong ổ đĩa (D:/) cần escape thành D\:/ trong filter ass
+            ass_path_str = ass_path_str.replace(":", "\\:")
+            filter_chains.append(f"[{curr_v}]ass='{ass_path_str}'[v]")
+            curr_v = "v"
+        else:
+            if curr_v != "v":
+                # Đổi tên nhãn cuối cùng từ [v_logo] thành [v]
+                last_filter = filter_chains.pop()
+                last_filter = last_filter.replace(f"[{curr_v}]", "[v]")
+                filter_chains.append(last_filter)
+                curr_v = "v"
+
+        filter_complex_str = ";".join(filter_chains)
+        cmd.extend([
+            "-filter_complex", filter_complex_str,
             "-map", "[v]",
             "-map", "1:a",
             "-c:v", "libx264",
@@ -307,9 +413,9 @@ def render_final_video(
             "-b:a", "192k",
             "-shortest",
             str(out_video)
-        ]
+        ])
     else:
-        # Trường hợp 2: Không nung phụ đề (copy thẳng luồng video để xuất cực nhanh)
+        # Trường hợp không có phụ đề lẫn logo: copy thẳng luồng video để xuất cực nhanh
         cmd = [
             ffmpeg_bin,
             "-y",

@@ -19,13 +19,13 @@ if sys.platform == "win32":
         pass
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, QLineEdit, QCheckBox,
     QLabel, QProgressBar, QTextEdit, QFileDialog, QInputDialog, QMessageBox,
-    QGroupBox, QColorDialog, QDialog
+    QGroupBox, QColorDialog, QDialog, QSlider
 )
 
 from config import Config
@@ -84,6 +84,7 @@ class DubbingWorker(QThread):
                     genre=self.options.get("genre", "Daily Life / Social Media"),
                     custom_terms=self.options.get("custom_terms", ""),
                     subtitle_options=self.options.get("subtitle_options"),
+                    watermark_options=self.options.get("watermark_options"),
                     output_dir=self.options.get("output_dir"),
                     progress_callback=progress_hook
                 )
@@ -100,21 +101,331 @@ class DubbingWorker(QThread):
 
 
 
+class WatermarkConfigDialog(QDialog):
+    """
+    Modal dialog allowing users to configure Text Watermark and Logo Image Watermark
+    with live thumbnail preview and opacity slider.
+    """
+    def __init__(self, parent=None, config: Optional[Dict[str, Any]] = None):
+        super().__init__(parent)
+        self.setWindowTitle("🎨 Watermark & Branding Settings")
+        self.setFixedSize(540, 500)
+        self.setModal(True)
+        self.config = dict(config or {})
+
+        self.init_ui()
+        self.load_values()
+        self.apply_dialog_styles()
+
+    def apply_dialog_styles(self):
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F8FAFC;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+                font-size: 12px;
+            }
+            QLineEdit, QComboBox, QSpinBox {
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 4px 8px;
+                background-color: #FFFFFF;
+                color: #0F172A;
+                font-size: 12px;
+            }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+                border: 1px solid #2563EB;
+            }
+            QTabWidget::pane {
+                border: 1px solid #CBD5E1;
+                background-color: #FFFFFF;
+                border-radius: 6px;
+                padding: 14px;
+            }
+            QTabBar::tab {
+                background-color: #E2E8F0;
+                color: #334155;
+                font-weight: bold;
+                padding: 7px 18px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                margin-right: 3px;
+                border: 1px solid #CBD5E1;
+                border-bottom: none;
+            }
+            QTabBar::tab:selected {
+                background-color: #FFFFFF;
+                color: #2563EB;
+                border-bottom: 2px solid #FFFFFF;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #E2E8F0;
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #2563EB;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #1D4ED8;
+                border: 2px solid #FFFFFF;
+                width: 16px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 8px;
+            }
+        """)
+
+    def init_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 16, 20, 16)
+        main_layout.setSpacing(14)
+
+        header_lbl = QLabel("<b>Watermark & Branding Settings</b>")
+        header_lbl.setStyleSheet("font-size: 15px; color: #0F172A;")
+        main_layout.addWidget(header_lbl)
+
+        sub_desc = QLabel("Configure promotional text banner and channel logo to protect and brand your videos.")
+        sub_desc.setStyleSheet("font-size: 11px; color: #64748B; margin-bottom: 4px;")
+        sub_desc.setWordWrap(True)
+        main_layout.addWidget(sub_desc)
+
+        self.tab_widget = QTabWidget()
+
+        # TAB 1: TEXT WATERMARK
+        tab_text = QWidget()
+        layout_text = QVBoxLayout(tab_text)
+        layout_text.setSpacing(12)
+
+        self.chk_text_enable = QCheckBox("Enable Text Watermark")
+        self.chk_text_enable.setStyleSheet("font-weight: bold; font-size: 13px; color: #1E293B;")
+        layout_text.addWidget(self.chk_text_enable)
+
+        grid_text = QGridLayout()
+        grid_text.setVerticalSpacing(10)
+        grid_text.setHorizontalSpacing(12)
+
+        grid_text.addWidget(QLabel("Watermark Text:"), 0, 0)
+        self.txt_text_content = QLineEdit()
+        self.txt_text_content.setFixedHeight(32)
+        self.txt_text_content.setPlaceholderText("e.g. Bạn đang xem video được sub bởi Vũ Mạnh Cường")
+        grid_text.addWidget(self.txt_text_content, 0, 1)
+
+        grid_text.addWidget(QLabel("Timing:"), 1, 0)
+        self.cbo_text_timing = QComboBox()
+        self.cbo_text_timing.setFixedHeight(32)
+        self.cbo_text_timing.addItem("Mid-video (Highlight 6s at midpoint)", "mid_video")
+        self.cbo_text_timing.addItem("Throughout Video (Full duration)", "full")
+        grid_text.addWidget(self.cbo_text_timing, 1, 1)
+
+        grid_text.addWidget(QLabel("Position:"), 2, 0)
+        self.cbo_text_pos = QComboBox()
+        self.cbo_text_pos.setFixedHeight(32)
+        self.cbo_text_pos.addItem("Center (Chính giữa màn hình)", "center")
+        self.cbo_text_pos.addItem("Top (Phía trên)", "top")
+        self.cbo_text_pos.addItem("Bottom (Phía dưới)", "bottom")
+        grid_text.addWidget(self.cbo_text_pos, 2, 1)
+
+        grid_text.addWidget(QLabel("Font Size:"), 3, 0)
+        self.spn_text_font_size = QSpinBox()
+        self.spn_text_font_size.setFixedHeight(32)
+        self.spn_text_font_size.setRange(14, 48)
+        self.spn_text_font_size.setValue(22)
+        grid_text.addWidget(self.spn_text_font_size, 3, 1)
+
+        layout_text.addLayout(grid_text)
+
+        tip_lbl = QLabel("💡 <i>Text watermark is rendered with a sleek semi-transparent badge for optimal readability on all video backgrounds.</i>")
+        tip_lbl.setStyleSheet("font-size: 11px; color: #64748B; margin-top: 6px;")
+        tip_lbl.setWordWrap(True)
+        layout_text.addWidget(tip_lbl)
+        layout_text.addStretch()
+
+        self.tab_widget.addTab(tab_text, "✍️ Text Watermark")
+
+        # TAB 2: LOGO IMAGE WATERMARK
+        tab_logo = QWidget()
+        layout_logo = QVBoxLayout(tab_logo)
+        layout_logo.setSpacing(12)
+
+        self.chk_logo_enable = QCheckBox("Enable Logo Watermark")
+        self.chk_logo_enable.setStyleSheet("font-weight: bold; font-size: 13px; color: #1E293B;")
+        layout_logo.addWidget(self.chk_logo_enable)
+
+        grid_logo = QGridLayout()
+        grid_logo.setVerticalSpacing(10)
+        grid_logo.setHorizontalSpacing(12)
+
+        grid_logo.addWidget(QLabel("Logo Image:"), 0, 0)
+        h_file = QHBoxLayout()
+        h_file.setSpacing(6)
+        self.txt_logo_path = QLineEdit()
+        self.txt_logo_path.setFixedHeight(32)
+        self.txt_logo_path.setPlaceholderText("Select PNG / JPG image...")
+        self.txt_logo_path.textChanged.connect(self.update_logo_preview)
+
+        self.btn_browse_logo = QPushButton("Browse...")
+        self.btn_browse_logo.setFixedHeight(32)
+        self.btn_browse_logo.setFixedWidth(80)
+        self.btn_browse_logo.setStyleSheet("background-color: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px; font-weight: 500;")
+        self.btn_browse_logo.clicked.connect(self.action_browse_logo)
+        h_file.addWidget(self.txt_logo_path)
+        h_file.addWidget(self.btn_browse_logo)
+        grid_logo.addLayout(h_file, 0, 1)
+
+        grid_logo.addWidget(QLabel("Preview:"), 1, 0)
+        self.lbl_logo_preview = QLabel("No image selected")
+        self.lbl_logo_preview.setFixedHeight(54)
+        self.lbl_logo_preview.setAlignment(Qt.AlignCenter)
+        self.lbl_logo_preview.setStyleSheet("border: 1px dashed #CBD5E1; border-radius: 6px; background-color: #F8FAFC; color: #94A3B8; font-size: 11px;")
+        grid_logo.addWidget(self.lbl_logo_preview, 1, 1)
+
+        grid_logo.addWidget(QLabel("Position:"), 2, 0)
+        self.cbo_logo_pos = QComboBox()
+        self.cbo_logo_pos.setFixedHeight(32)
+        self.cbo_logo_pos.addItem("Top-Right (Standard for short video)", "top-right")
+        self.cbo_logo_pos.addItem("Top-Left", "top-left")
+        self.cbo_logo_pos.addItem("Bottom-Right", "bottom-right")
+        self.cbo_logo_pos.addItem("Bottom-Left", "bottom-left")
+        self.cbo_logo_pos.addItem("Center", "center")
+        grid_logo.addWidget(self.cbo_logo_pos, 2, 1)
+
+        grid_logo.addWidget(QLabel("Opacity:"), 3, 0)
+        h_op = QHBoxLayout()
+        h_op.setSpacing(10)
+        self.slider_opacity = QSlider(Qt.Horizontal)
+        self.slider_opacity.setRange(10, 100)
+        self.slider_opacity.setValue(80)
+        self.lbl_op_val = QLabel("80%")
+        self.lbl_op_val.setFixedWidth(38)
+        self.lbl_op_val.setStyleSheet("font-weight: bold; color: #2563EB;")
+        self.slider_opacity.valueChanged.connect(lambda v: self.lbl_op_val.setText(f"{v}%"))
+        h_op.addWidget(self.slider_opacity)
+        h_op.addWidget(self.lbl_op_val)
+        grid_logo.addLayout(h_op, 3, 1)
+
+        grid_logo.addWidget(QLabel("Max Width:"), 4, 0)
+        self.spn_logo_max_width = QSpinBox()
+        self.spn_logo_max_width.setFixedHeight(32)
+        self.spn_logo_max_width.setRange(60, 400)
+        self.spn_logo_max_width.setValue(160)
+        self.spn_logo_max_width.setSuffix(" px")
+        grid_logo.addWidget(self.spn_logo_max_width, 4, 1)
+
+        layout_logo.addLayout(grid_logo)
+        layout_logo.addStretch()
+
+        self.tab_widget.addTab(tab_logo, "🖼️ Logo Image")
+        main_layout.addWidget(self.tab_widget)
+
+        # Dialog Buttons
+        btn_box = QHBoxLayout()
+        btn_box.setSpacing(10)
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setFixedHeight(34)
+        self.btn_cancel.setStyleSheet("background-color: #FFFFFF; color: #64748B; border: 1px solid #CBD5E1; border-radius: 6px; padding: 0 16px;")
+        self.btn_cancel.clicked.connect(self.reject)
+
+        self.btn_save = QPushButton("Save Settings")
+        self.btn_save.setFixedHeight(34)
+        self.btn_save.setStyleSheet("background-color: #2563EB; color: #FFFFFF; font-weight: bold; border-radius: 6px; padding: 0 20px;")
+        self.btn_save.clicked.connect(self.action_save)
+
+        btn_box.addStretch()
+        btn_box.addWidget(self.btn_cancel)
+        btn_box.addWidget(self.btn_save)
+        main_layout.addLayout(btn_box)
+
+    def load_values(self):
+        # Text Watermark values
+        self.chk_text_enable.setChecked(self.config.get("text_enabled", False))
+        self.txt_text_content.setText(self.config.get("text", "Bạn đang xem video được sub bởi Vũ Mạnh Cường"))
+
+        timing = self.config.get("text_timing", "mid_video")
+        idx_timing = self.cbo_text_timing.findData(timing)
+        if idx_timing >= 0:
+            self.cbo_text_timing.setCurrentIndex(idx_timing)
+
+        pos = self.config.get("text_position", "center")
+        idx_pos = self.cbo_text_pos.findData(pos)
+        if idx_pos >= 0:
+            self.cbo_text_pos.setCurrentIndex(idx_pos)
+
+        self.spn_text_font_size.setValue(int(self.config.get("text_font_size", 22)))
+
+        # Logo Watermark values
+        self.chk_logo_enable.setChecked(self.config.get("logo_enabled", False))
+        logo_path = self.config.get("logo_path", "")
+        self.txt_logo_path.setText(logo_path)
+        self.update_logo_preview(logo_path)
+
+        logo_pos = self.config.get("logo_position", "top-right")
+        idx_logo_pos = self.cbo_logo_pos.findData(logo_pos)
+        if idx_logo_pos >= 0:
+            self.cbo_logo_pos.setCurrentIndex(idx_logo_pos)
+
+        opacity_val = int(round(float(self.config.get("logo_opacity", 0.8)) * 100))
+        self.slider_opacity.setValue(opacity_val)
+        self.lbl_op_val.setText(f"{opacity_val}%")
+
+        self.spn_logo_max_width.setValue(int(self.config.get("logo_max_width", 160)))
+
+    def update_logo_preview(self, path_str: str):
+        path = Path(path_str.strip())
+        if path.is_file():
+            pix = QPixmap(str(path))
+            if not pix.isNull():
+                scaled = pix.scaled(160, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.lbl_logo_preview.setPixmap(scaled)
+                self.lbl_logo_preview.setText("")
+                return
+        self.lbl_logo_preview.setPixmap(QPixmap())
+        self.lbl_logo_preview.setText("No valid image selected")
+
+    def action_browse_logo(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Logo Image",
+            "",
+            "Image Files (*.png *.jpg *.jpeg *.webp)"
+        )
+        if file_path:
+            self.txt_logo_path.setText(file_path)
+
+    def action_save(self):
+        self.config["text_enabled"] = self.chk_text_enable.isChecked()
+        self.config["text"] = self.txt_text_content.text().strip()
+        self.config["text_timing"] = self.cbo_text_timing.currentData() or "mid_video"
+        self.config["text_position"] = self.cbo_text_pos.currentData() or "center"
+        self.config["text_font_size"] = self.spn_text_font_size.value()
+
+        self.config["logo_enabled"] = self.chk_logo_enable.isChecked()
+        self.config["logo_path"] = self.txt_logo_path.text().strip()
+        self.config["logo_position"] = self.cbo_logo_pos.currentData() or "top-right"
+        self.config["logo_opacity"] = self.slider_opacity.value() / 100.0
+        self.config["logo_max_width"] = self.spn_logo_max_width.value()
+
+        self.accept()
+
+
 class MainWindow(QMainWindow):
     """Main window for AutoDub Studio."""
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AutoDub Studio - AI Video Dubbing & Subtitles")
-        self.resize(1280, 860)
-        self.setMinimumSize(1080, 760)
+        self.resize(1280, 890)
+        self.setMinimumSize(1080, 780)
 
         # Căn giữa cửa sổ trên màn hình desktop
         try:
             screen_geo = QApplication.primaryScreen().availableGeometry()
             self.move(
                 max(0, (screen_geo.width() - 1280) // 2),
-                max(0, (screen_geo.height() - 860) // 2)
+                max(0, (screen_geo.height() - 890) // 2)
             )
         except Exception:
             pass
@@ -197,6 +508,20 @@ class MainWindow(QMainWindow):
             }
         }
 
+        # Cấu hình Watermark mặc định
+        self.watermark_config = {
+            "text_enabled": True,
+            "text": "Bạn đang xem video được sub bởi Vũ Mạnh Cường",
+            "text_timing": "mid_video",
+            "text_position": "center",
+            "text_font_size": 22,
+            "logo_enabled": False,
+            "logo_path": "",
+            "logo_position": "top-right",
+            "logo_opacity": 0.80,
+            "logo_max_width": 160
+        }
+
         self.init_ui()
         self.apply_styles()
 
@@ -265,7 +590,7 @@ class MainWindow(QMainWindow):
         self.table_queue.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table_queue.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table_queue.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table_queue.setFixedHeight(105)
+        self.table_queue.setFixedHeight(95)
         self.table_queue.setSelectionBehavior(QTableWidget.SelectRows)
         tab_layout.addWidget(self.table_queue)
 
@@ -426,10 +751,10 @@ class MainWindow(QMainWindow):
 
         # Group ⑤ Export
         grp_export = QGroupBox("⑤ Export")
-        grp_export.setMinimumHeight(245)
+        grp_export.setMinimumHeight(280)
         layout_export = QGridLayout(grp_export)
-        layout_export.setContentsMargins(18, 14, 18, 14)
-        layout_export.setVerticalSpacing(12)
+        layout_export.setContentsMargins(18, 10, 18, 10)
+        layout_export.setVerticalSpacing(8)
         layout_export.setHorizontalSpacing(14)
         layout_export.setColumnStretch(0, 0)
         layout_export.setColumnStretch(1, 1)
@@ -449,16 +774,16 @@ class MainWindow(QMainWindow):
         h_font = QHBoxLayout()
         h_font.setSpacing(12)
         self.cbo_font = QComboBox()
-        self.cbo_font.setFixedHeight(32)
+        self.cbo_font.setFixedHeight(30)
         self.cbo_font.setFixedWidth(200)
         self.cbo_font.addItems(["Arial", "DejaVu Sans Bold", "Montserrat", "Segoe UI"])
         lbl_size = QLabel("Size:")
         lbl_size.setFixedWidth(34)
         self.spn_font_size = QSpinBox()
-        self.spn_font_size.setFixedHeight(32)
+        self.spn_font_size.setFixedHeight(30)
         self.spn_font_size.setFixedWidth(80)
         self.spn_font_size.setRange(10, 100)
-        self.spn_font_size.setValue(22)
+        self.spn_font_size.setValue(32)
         h_font.addWidget(self.cbo_font)
         h_font.addWidget(lbl_size)
         h_font.addWidget(self.spn_font_size)
@@ -471,7 +796,7 @@ class MainWindow(QMainWindow):
         h_sub_style.setSpacing(10)
 
         self.cbo_sub_style = QComboBox()
-        self.cbo_sub_style.setFixedHeight(32)
+        self.cbo_sub_style.setFixedHeight(30)
         self.cbo_sub_style.setFixedWidth(200)
         self.cbo_sub_style.addItems(list(self.SUB_STYLE_PRESETS.keys()))
         self.cbo_sub_style.currentTextChanged.connect(self.on_sub_style_changed)
@@ -500,7 +825,74 @@ class MainWindow(QMainWindow):
         h_sub_style.addStretch()
         layout_export.addLayout(h_sub_style, 2, 1)
 
-        layout_export.addWidget(QLabel("Encoder:"), 3, 0)
+        # Row 3: Sub Position (Che phụ đề cũ)
+        layout_export.addWidget(QLabel("Sub Position:"), 3, 0)
+        h_sub_pos = QHBoxLayout()
+        h_sub_pos.setSpacing(10)
+        self.cbo_sub_pos = QComboBox()
+        self.cbo_sub_pos.setFixedHeight(30)
+        self.cbo_sub_pos.setFixedWidth(180)
+        self.cbo_sub_pos.addItems([
+            "Bottom Standard (40px)",
+            "Cover Low Sub (120px)",
+            "Cover Mid Sub (220px)",
+            "Top Header (50px)",
+            "Custom..."
+        ])
+        self.cbo_sub_pos.currentTextChanged.connect(self.on_sub_pos_changed)
+
+        lbl_margin_v = QLabel("Margin:")
+        lbl_margin_v.setFixedWidth(46)
+        self.spn_sub_margin_v = QSpinBox()
+        self.spn_sub_margin_v.setFixedHeight(30)
+        self.spn_sub_margin_v.setFixedWidth(84)
+        self.spn_sub_margin_v.setRange(0, 600)
+        self.spn_sub_margin_v.setValue(40)
+        self.spn_sub_margin_v.setSuffix(" px")
+        self.spn_sub_margin_v.valueChanged.connect(self.on_sub_margin_spin_changed)
+
+        lbl_pad = QLabel("Box Pad:")
+        lbl_pad.setFixedWidth(52)
+        self.spn_box_padding = QSpinBox()
+        self.spn_box_padding.setFixedHeight(30)
+        self.spn_box_padding.setFixedWidth(78)
+        self.spn_box_padding.setRange(0, 30)
+        self.spn_box_padding.setValue(6)
+        self.spn_box_padding.setSuffix(" px")
+
+        h_sub_pos.addWidget(self.cbo_sub_pos)
+        h_sub_pos.addWidget(lbl_margin_v)
+        h_sub_pos.addWidget(self.spn_sub_margin_v)
+        h_sub_pos.addWidget(lbl_pad)
+        h_sub_pos.addWidget(self.spn_box_padding)
+        h_sub_pos.addStretch()
+        layout_export.addLayout(h_sub_pos, 3, 1)
+
+        # Row 4: Watermark
+        layout_export.addWidget(QLabel("Watermark:"), 4, 0)
+        h_wm = QHBoxLayout()
+        h_wm.setSpacing(10)
+        self.chk_watermark = QCheckBox("Enable")
+        self.chk_watermark.setChecked(True)
+        self.chk_watermark.setFixedHeight(30)
+
+        self.btn_watermark_cfg = QPushButton("🎨 Watermark Settings...")
+        self.btn_watermark_cfg.setFixedHeight(30)
+        self.btn_watermark_cfg.setFixedWidth(180)
+        self.btn_watermark_cfg.setStyleSheet("background-color: #F8FAFC; color: #0F172A; font-weight: 500; font-size: 12px; border: 1px solid #CBD5E1; border-radius: 6px;")
+        self.btn_watermark_cfg.clicked.connect(self.action_open_watermark_dialog)
+
+        self.lbl_watermark_summary = QLabel("(Text: On, Logo: Off)")
+        self.lbl_watermark_summary.setStyleSheet("color: #64748B; font-size: 11px;")
+
+        h_wm.addWidget(self.chk_watermark)
+        h_wm.addWidget(self.btn_watermark_cfg)
+        h_wm.addWidget(self.lbl_watermark_summary)
+        h_wm.addStretch()
+        layout_export.addLayout(h_wm, 4, 1)
+
+        # Row 5: Encoder
+        layout_export.addWidget(QLabel("Encoder:"), 5, 0)
         h_enc = QHBoxLayout()
         h_enc.setSpacing(12)
         self.cbo_encoder = QComboBox()
@@ -517,9 +909,10 @@ class MainWindow(QMainWindow):
         h_enc.addWidget(lbl_quality)
         h_enc.addWidget(self.cbo_quality)
         h_enc.addStretch()
-        layout_export.addLayout(h_enc, 3, 1)
+        layout_export.addLayout(h_enc, 5, 1)
 
-        layout_export.addWidget(QLabel("Save To:"), 4, 0)
+        # Row 6: Save To
+        layout_export.addWidget(QLabel("Save To:"), 6, 0)
         h_out = QHBoxLayout()
         h_out.setSpacing(8)
         self.txt_output_dir = QLineEdit(str(Config.OUTPUT_DIR))
@@ -531,7 +924,7 @@ class MainWindow(QMainWindow):
         self.btn_browse_out.clicked.connect(self.action_browse_output_dir)
         h_out.addWidget(self.txt_output_dir)
         h_out.addWidget(self.btn_browse_out)
-        layout_export.addLayout(h_out, 4, 1)
+        layout_export.addLayout(h_out, 6, 1)
         right_col.addWidget(grp_export)
 
         config_grid.addLayout(right_col, 0, 1)
@@ -1124,6 +1517,69 @@ class MainWindow(QMainWindow):
             self.cbo_sub_style.blockSignals(False)
             self.update_sub_color_swatches()
 
+    @Slot(str)
+    def on_sub_pos_changed(self, pos_name: str):
+        """Adjust margin_v spinbox based on position preset."""
+        preset_margins = {
+            "Bottom Standard (40px)": 40,
+            "Cover Low Sub (120px)": 120,
+            "Cover Mid Sub (220px)": 220,
+            "Top Header (50px)": 50
+        }
+        if pos_name in preset_margins:
+            self.spn_sub_margin_v.blockSignals(True)
+            self.spn_sub_margin_v.setValue(preset_margins[pos_name])
+            self.spn_sub_margin_v.blockSignals(False)
+
+    @Slot(int)
+    def on_sub_margin_spin_changed(self, val: int):
+        """Switch preset dropdown to Custom if user manually edits the margin spinbox."""
+        found = False
+        preset_margins = {
+            "Bottom Standard (40px)": 40,
+            "Cover Low Sub (120px)": 120,
+            "Cover Mid Sub (220px)": 220,
+            "Top Header (50px)": 50
+        }
+        for name, m in preset_margins.items():
+            if m == val:
+                self.cbo_sub_pos.blockSignals(True)
+                self.cbo_sub_pos.setCurrentText(name)
+                self.cbo_sub_pos.blockSignals(False)
+                found = True
+                break
+        if not found:
+            self.cbo_sub_pos.blockSignals(True)
+            self.cbo_sub_pos.setCurrentText("Custom...")
+            self.cbo_sub_pos.blockSignals(False)
+
+    @Slot()
+    def action_open_watermark_dialog(self):
+        """Open modal dialog to configure text and logo watermarks."""
+        dialog = WatermarkConfigDialog(self, self.watermark_config)
+        if dialog.exec():
+            self.watermark_config = dialog.config
+            self.update_watermark_summary()
+
+    def update_watermark_summary(self):
+        """Update summary label next to Watermark Settings button."""
+        parts = []
+        if self.watermark_config.get("text_enabled", False):
+            parts.append("Text: On")
+        else:
+            parts.append("Text: Off")
+
+        if self.watermark_config.get("logo_enabled", False) and self.watermark_config.get("logo_path"):
+            fname = Path(self.watermark_config["logo_path"]).name
+            if len(fname) > 14:
+                fname = fname[:11] + "..."
+            parts.append(f"Logo: {fname}")
+        else:
+            parts.append("Logo: Off")
+
+        summary = f"({', '.join(parts)})"
+        self.lbl_watermark_summary.setText(summary)
+
     @Slot()
     def action_start_dubbing(self):
         """Start batch processing via DubbingWorker thread."""
@@ -1155,8 +1611,15 @@ class MainWindow(QMainWindow):
             "border_style": self.sub_border_style,
             "outline_width": self.sub_outline_width,
             "shadow_width": self.sub_shadow_width,
-            "margin_v": 40
+            "margin_v": self.spn_sub_margin_v.value(),
+            "alignment": 8 if "top" in self.cbo_sub_pos.currentText().lower() else 2,
+            "box_padding": self.spn_box_padding.value()
         }
+
+        watermark_options = {}
+        if self.chk_watermark.isChecked():
+            watermark_options = dict(self.watermark_config)
+
         options = {
             "source_lang": source_lang,
             "voice": voice_key,
@@ -1165,6 +1628,7 @@ class MainWindow(QMainWindow):
             "genre": self.cbo_genre.currentText(),
             "custom_terms": self.txt_custom_terms.text().strip(),
             "subtitle_options": subtitle_options,
+            "watermark_options": watermark_options,
             "output_dir": Path(self.txt_output_dir.text()).resolve()
         }
 
