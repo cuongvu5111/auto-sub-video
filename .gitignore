@@ -29,3 +29,7 @@ temp/
 .idea/
 Thumbs.db
 Desktop.ini
+
+# File nhị phân thực thi portable
+bin/*.exe
+bin/
