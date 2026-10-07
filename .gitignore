@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Cài đặt môi trường ảo
+.venv/
+venv/
+env/
+ENV/
+
+# Tệp tin cấu hình bảo mật
+.env
+.env.local
+*.key
+
+# Tệp tin tạm thời trong quá trình xử lý audio/video
+temp/
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.ass
+*.srt
+*.log
+
+# Cấu hình IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
