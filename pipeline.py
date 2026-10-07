@@ -35,6 +35,7 @@ def run_pipeline(
     custom_terms: str = "",
     subtitle_options: Optional[Dict[str, Any]] = None,
     watermark_options: Optional[Dict[str, Any]] = None,
+    encoder: Optional[str] = None,
     output_dir: Optional[Path] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None
 ) -> Path:
@@ -162,6 +163,7 @@ def run_pipeline(
         final_video_path,
         ass_subtitle_path=ass_file,
         watermark_options=wm_opts,
+        encoder=encoder,
         progress_callback=lambda m, p: report(f"Step 6/6: {m}", 90.0 + p * 0.10)
     )
 

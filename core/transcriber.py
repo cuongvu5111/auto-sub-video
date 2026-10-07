@@ -39,8 +39,20 @@ def get_whisper_model(
     global _CACHED_MODEL, _CACHED_MODEL_NAME
 
     target_model = model_size or Config.WHISPER_MODEL
-    target_device = device or Config.WHISPER_DEVICE
-    target_compute = compute_type or Config.WHISPER_COMPUTE_TYPE
+    req_device = (device or Config.WHISPER_DEVICE or "auto").lower()
+    req_compute = (compute_type or Config.WHISPER_COMPUTE_TYPE or "auto").lower()
+
+    # Tự động nhận diện phần cứng nếu đặt là auto
+    hw = Config.detect_hardware_capabilities()
+    if req_device == "auto":
+        target_device = "cuda" if hw["has_cuda"] else "cpu"
+    else:
+        target_device = req_device
+
+    if req_compute == "auto":
+        target_compute = "float16" if target_device == "cuda" else "int8"
+    else:
+        target_compute = req_compute
 
     cache_key = f"{target_model}_{target_device}_{target_compute}"
 
@@ -55,12 +67,11 @@ def get_whisper_model(
         )
 
     try:
-        # Nạp mô hình với CTranslate2
+        # Nạp mô hình với CTranslate2 (CUDA hoặc CPU)
         model = WhisperModel(
             target_model,
             device=target_device,
             compute_type=target_compute,
-            # Tự động lưu cache tải model vào thư mục người dùng
             download_root=str(Config.TEMP_DIR / "whisper_models")
         )
         _CACHED_MODEL = model
@@ -68,6 +79,22 @@ def get_whisper_model(
         return model
 
     except Exception as e:
+        # Nếu đang khởi tạo bằng CUDA mà thất bại (thiếu cuDNN/driver), tự động fallback CPU mượt mà
+        if target_device == "cuda":
+            try:
+                print(f"[Whisper] CUDA initialization failed ({e}). Auto-falling back to CPU int8...")
+                fallback_model = WhisperModel(
+                    target_model,
+                    device="cpu",
+                    compute_type="int8",
+                    download_root=str(Config.TEMP_DIR / "whisper_models")
+                )
+                _CACHED_MODEL = fallback_model
+                _CACHED_MODEL_NAME = f"{target_model}_cpu_int8"
+                return fallback_model
+            except Exception as cpu_err:
+                raise TranscriptionError(f"Lỗi khởi tạo Whisper trên CPU sau khi CUDA thất bại: {str(cpu_err)}") from cpu_err
+
         raise TranscriptionError(f"Không thể khởi tạo mô hình Whisper ({target_model}): {str(e)}") from e
 
 

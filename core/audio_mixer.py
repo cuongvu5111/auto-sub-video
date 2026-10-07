@@ -319,6 +319,7 @@ def render_final_video(
     output_video_path: Path,
     ass_subtitle_path: Optional[Path] = None,
     watermark_options: Optional[Dict[str, Any]] = None,
+    encoder: Optional[str] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None
 ) -> Path:
     """
@@ -326,6 +327,7 @@ def render_final_video(
     - Thay thế track âm thanh gốc bằng track âm thanh đã hòa âm.
     - Nung phụ đề .ass trực tiếp vào khung hình (nếu có yêu cầu).
     - Chèn Logo Watermark (vị trí tùy biến, độ mờ Opacity, tự động co tỉ lệ).
+    - Tự động dùng bộ mã hóa phần cứng h264_nvenc nếu có GPU NVIDIA, tự động fallback về libx264 nếu lỗi.
     """
     orig_video = Path(original_video_path).resolve()
     mixed_audio = Path(mixed_audio_path).resolve()
@@ -355,8 +357,20 @@ def render_final_video(
             has_logo = True
             logo_path = Path(candidate_path).resolve()
 
+    # Xác định bộ mã hóa video phù hợp
+    hw = Config.detect_hardware_capabilities()
+    enc_lower = (encoder or "").lower()
+    if not encoder or enc_lower.startswith("auto"):
+        target_encoder = "h264_nvenc" if hw["has_nvenc"] else "libx264"
+    elif "nvenc" in enc_lower:
+        target_encoder = "h264_nvenc"
+    elif "copy" in enc_lower and not (has_sub or has_logo):
+        target_encoder = "copy"
+    else:
+        target_encoder = "libx264"
+
     if has_sub or has_logo:
-        # Trường hợp cần xử lý hình ảnh qua filter_complex và mã hóa lại libx264
+        # Trường hợp cần xử lý hình ảnh qua filter_complex
         cmd = [
             ffmpeg_bin,
             "-y",
@@ -404,13 +418,17 @@ def render_final_video(
                 curr_v = "v"
 
         filter_complex_str = ";".join(filter_chains)
+
+        if target_encoder == "h264_nvenc":
+            video_codec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "22"]
+        else:
+            video_codec_args = ["-c:v", "libx264", "-preset", "fast", "-crf", "22"]
+
         cmd.extend([
             "-filter_complex", filter_complex_str,
             "-map", "[v]",
             "-map", "1:a",
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "22",
+            *video_codec_args,
             "-c:a", "aac",
             "-b:a", "192k",
             "-shortest",
@@ -449,5 +467,32 @@ def render_final_video(
         return out_video
 
     except subprocess.CalledProcessError as e:
+        # Tự động Fallback về CPU libx264 nếu h264_nvenc không thể khởi động
+        if target_encoder == "h264_nvenc":
+            try:
+                fb_cmd = []
+                idx = 0
+                while idx < len(cmd):
+                    if cmd[idx] == "-c:v" and idx + 1 < len(cmd) and cmd[idx + 1] == "h264_nvenc":
+                        fb_cmd.extend(["-c:v", "libx264", "-preset", "fast", "-crf", "22"])
+                        idx += 6  # Bỏ qua: -c:v, h264_nvenc, -preset, p4, -cq, 22
+                    else:
+                        fb_cmd.append(cmd[idx])
+                        idx += 1
+
+                fb_proc = subprocess.run(
+                    fb_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=True
+                )
+                if out_video.exists() and out_video.stat().st_size > 0:
+                    if progress_callback:
+                        progress_callback(f"Xuất video hoàn tất (CPU Fallback): {out_video.name}", 100.0)
+                    return out_video
+            except Exception:
+                pass
+
         error_msg = e.stderr[-400:] if e.stderr else str(e)
         raise AudioMixerError(f"Lỗi khi render video bằng FFmpeg: {error_msg}") from e

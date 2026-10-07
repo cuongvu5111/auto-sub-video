@@ -134,6 +134,18 @@ def test_ass_text_watermark():
     print("✓ test_ass_text_watermark: PASSED")
 
 
+def test_hardware_capabilities_detection():
+    """Kiểm tra hàm phát hiện phần cứng trả về đúng định dạng dict và kiểu boolean."""
+    from config import Config
+    hw = Config.detect_hardware_capabilities()
+    assert isinstance(hw, dict)
+    assert "has_cuda" in hw and isinstance(hw["has_cuda"], bool)
+    assert "has_nvenc" in hw and isinstance(hw["has_nvenc"], bool)
+    assert "recommended_device" in hw and hw["recommended_device"] in ("cuda", "cpu")
+    assert "recommended_encoder" in hw and hw["recommended_encoder"] in ("h264_nvenc", "libx264")
+    print("✓ test_hardware_capabilities_detection: PASSED")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 6 ===")
     test_ass_timestamp_formatting()
@@ -142,5 +154,6 @@ if __name__ == "__main__":
     test_custom_ass_styling()
     test_ass_subtitle_positioning()
     test_ass_text_watermark()
+    test_hardware_capabilities_detection()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 6 ĐÃ VƯỢT QUA ===")
 

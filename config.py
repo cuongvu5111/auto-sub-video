@@ -61,10 +61,10 @@ class Config:
     LLM_MODEL: str = os.getenv("LLM_MODEL") or os.getenv("VNPT_LLM_MODEL", "global-llm")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("VNPT_LLM_API_KEY", "no-key-required")
 
-    # Cấu hình Whisper Speech-to-Text
+    # Cấu hình Whisper Speech-to-Text (Mặc định 'auto' để tự động phát hiện GPU/CPU)
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
-    WHISPER_DEVICE: str = os.getenv("WHISPER_DEVICE", "cpu")
-    WHISPER_COMPUTE_TYPE: str = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+    WHISPER_DEVICE: str = os.getenv("WHISPER_DEVICE", "auto")
+    WHISPER_COMPUTE_TYPE: str = os.getenv("WHISPER_COMPUTE_TYPE", "auto")
 
     # Cấu hình lồng tiếng Text-to-Speech (edge-tts)
     DEFAULT_VOICE: str = os.getenv("DEFAULT_VOICE", "vi-VN-NamMinhNeural")
@@ -83,6 +83,50 @@ class Config:
         """Tự động tạo các thư mục cần thiết nếu chưa tồn tại trên ổ đĩa."""
         cls.TEMP_DIR.mkdir(parents=True, exist_ok=True)
         cls.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def detect_hardware_capabilities(cls) -> dict:
+        """
+        Tự động phát hiện khả năng tăng tốc phần cứng của hệ thống:
+        - NVIDIA CUDA (qua ctranslate2) cho mô hình Whisper Speech-to-Text.
+        - NVIDIA NVENC (qua ffmpeg h264_nvenc) cho tác vụ mã hóa video.
+        """
+        import subprocess
+        capabilities = {
+            "has_cuda": False,
+            "has_nvenc": False,
+            "recommended_device": "cpu",
+            "recommended_compute": "int8",
+            "recommended_encoder": "libx264"
+        }
+
+        # 1. Kiểm tra CUDA cho Whisper
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                capabilities["has_cuda"] = True
+                capabilities["recommended_device"] = "cuda"
+                capabilities["recommended_compute"] = "float16"
+        except Exception:
+            pass
+
+        # 2. Kiểm tra NVENC cho FFmpeg
+        try:
+            ffmpeg_bin = cls.BIN_DIR / "ffmpeg.exe"
+            if ffmpeg_bin.exists():
+                res = subprocess.run(
+                    [str(ffmpeg_bin), "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.04", "-c:v", "h264_nvenc", "-f", "null", "-"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=3
+                )
+                if res.returncode == 0:
+                    capabilities["has_nvenc"] = True
+                    capabilities["recommended_encoder"] = "h264_nvenc"
+        except Exception:
+            pass
+
+        return capabilities
 
     @classmethod
     def save_llm_config(cls, base_url: str, api_key: str, model: str) -> None:

@@ -85,6 +85,7 @@ class DubbingWorker(QThread):
                     custom_terms=self.options.get("custom_terms", ""),
                     subtitle_options=self.options.get("subtitle_options"),
                     watermark_options=self.options.get("watermark_options"),
+                    encoder=self.options.get("encoder"),
                     output_dir=self.options.get("output_dir"),
                     progress_callback=progress_hook
                 )
@@ -895,23 +896,37 @@ class MainWindow(QMainWindow):
         h_wm.addStretch()
         layout_export.addLayout(h_wm, 4, 1)
 
-        # Row 5: Encoder
+        # Row 5: Encoder & Hardware Acceleration
         layout_export.addWidget(QLabel("Encoder:"), 5, 0)
         h_enc = QHBoxLayout()
-        h_enc.setSpacing(12)
+        h_enc.setSpacing(10)
         self.cbo_encoder = QComboBox()
         self.cbo_encoder.setFixedHeight(32)
-        self.cbo_encoder.setFixedWidth(200)
-        self.cbo_encoder.addItems(["libx264 (CPU)", "copy (Passthrough - Instant)"])
-        lbl_quality = QLabel("Quality:")
-        lbl_quality.setFixedWidth(48)
-        self.cbo_quality = QComboBox()
-        self.cbo_quality.setFixedHeight(32)
-        self.cbo_quality.setFixedWidth(100)
-        self.cbo_quality.addItems(["Best", "1080p", "720p"])
+        self.cbo_encoder.setFixedWidth(260)
+
+        hw_caps = Config.detect_hardware_capabilities()
+        if hw_caps["has_nvenc"]:
+            self.cbo_encoder.addItem("⚡ h264_nvenc (NVIDIA GPU - Super Fast)", "h264_nvenc")
+            self.cbo_encoder.addItem("libx264 (CPU Standard)", "libx264")
+            self.cbo_encoder.addItem("copy (Passthrough - Instant)", "copy")
+        else:
+            self.cbo_encoder.addItem("libx264 (CPU Standard)", "libx264")
+            self.cbo_encoder.addItem("copy (Passthrough - Instant)", "copy")
+            self.cbo_encoder.addItem("⚡ h264_nvenc (NVIDIA GPU - Auto Fallback)", "h264_nvenc")
+
+        # Hardware status indicator badge
+        if hw_caps["has_cuda"] or hw_caps["has_nvenc"]:
+            hw_text = "🚀 GPU Active (NVIDIA CUDA/NVENC)"
+            hw_style = "color: #16A34A; font-weight: bold; font-size: 11px; background-color: #DCFCE7; padding: 4px 8px; border-radius: 4px;"
+        else:
+            hw_text = "💻 CPU Engine (Intel/AMD)"
+            hw_style = "color: #475569; font-size: 11px; background-color: #F1F5F9; padding: 4px 8px; border-radius: 4px;"
+
+        self.lbl_hw_status = QLabel(hw_text)
+        self.lbl_hw_status.setStyleSheet(hw_style)
+
         h_enc.addWidget(self.cbo_encoder)
-        h_enc.addWidget(lbl_quality)
-        h_enc.addWidget(self.cbo_quality)
+        h_enc.addWidget(self.lbl_hw_status)
         h_enc.addStretch()
         layout_export.addLayout(h_enc, 5, 1)
 
@@ -1624,6 +1639,7 @@ class MainWindow(QMainWindow):
         if self.chk_watermark.isChecked():
             watermark_options = dict(self.watermark_config)
 
+        encoder_key = self.cbo_encoder.currentData() or "libx264"
         options = {
             "source_lang": source_lang,
             "voice": voice_key,
@@ -1633,6 +1649,7 @@ class MainWindow(QMainWindow):
             "custom_terms": self.txt_custom_terms.text().strip(),
             "subtitle_options": subtitle_options,
             "watermark_options": watermark_options,
+            "encoder": encoder_key,
             "output_dir": Path(self.txt_output_dir.text()).resolve()
         }
 
