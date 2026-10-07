@@ -104,8 +104,18 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AutoDub Studio - AI Video Dubbing & Subtitles")
-        self.resize(1150, 780)
-        self.setMinimumSize(950, 650)
+        self.resize(1280, 860)
+        self.setMinimumSize(1080, 720)
+
+        # Căn giữa cửa sổ trên màn hình desktop
+        try:
+            screen_geo = QApplication.primaryScreen().availableGeometry()
+            self.move(
+                max(0, (screen_geo.width() - 1280) // 2),
+                max(0, (screen_geo.height() - 860) // 2)
+            )
+        except Exception:
+            pass
 
         self.worker: Optional[DubbingWorker] = None
 
@@ -116,8 +126,8 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 8, 10, 10)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(14, 10, 14, 12)
+        main_layout.setSpacing(10)
 
         # 1. TOP TABS (Full Width across the window)
         self.tabs = QTabWidget()
@@ -138,8 +148,8 @@ class MainWindow(QMainWindow):
 
         # MAIN VIDEO DUBBING TAB LAYOUT
         tab_layout = QVBoxLayout(self.tab_dubbing)
-        tab_layout.setContentsMargins(4, 6, 4, 4)
-        tab_layout.setSpacing(8)
+        tab_layout.setContentsMargins(8, 10, 8, 8)
+        tab_layout.setSpacing(10)
 
         # 2. VIDEO QUEUE SECTION
         lbl_queue = QLabel("<b>Videos to Dub</b>")
@@ -147,12 +157,16 @@ class MainWindow(QMainWindow):
 
         # Queue Toolbar
         queue_toolbar = QHBoxLayout()
-        queue_toolbar.setSpacing(6)
+        queue_toolbar.setSpacing(8)
 
         self.btn_paste_links = QPushButton("+ Paste Video Links...")
+        self.btn_paste_links.setFixedHeight(32)
         self.btn_add_files = QPushButton("+ Add Videos...")
+        self.btn_add_files.setFixedHeight(32)
         self.btn_attach_srt = QPushButton("Attach .srt to Selected...")
+        self.btn_attach_srt.setFixedHeight(32)
         self.btn_remove_row = QPushButton("Remove Selected")
+        self.btn_remove_row.setFixedHeight(32)
         self.chk_only_srt = QCheckBox("Translate .srt only...")
 
         self.btn_paste_links.clicked.connect(self.action_paste_links)
@@ -173,7 +187,7 @@ class MainWindow(QMainWindow):
         self.table_queue.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table_queue.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table_queue.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table_queue.setFixedHeight(120)
+        self.table_queue.setFixedHeight(135)
         self.table_queue.setSelectionBehavior(QTableWidget.SelectRows)
         tab_layout.addWidget(self.table_queue)
 
@@ -190,28 +204,31 @@ class MainWindow(QMainWindow):
 
         # 4. TWO-COLUMN CONFIGURATION GRID
         config_grid = QGridLayout()
-        config_grid.setSpacing(10)
+        config_grid.setSpacing(14)
 
         # --- LEFT COLUMN: Original Subtitles & Translation ---
         left_col = QVBoxLayout()
+        left_col.setSpacing(12)
 
         # Group ② Original Subtitles
         grp_source = QGroupBox("② Original Subtitle")
         layout_source = QGridLayout(grp_source)
-        layout_source.setVerticalSpacing(8)
-        layout_source.setHorizontalSpacing(10)
+        layout_source.setContentsMargins(16, 18, 16, 14)
+        layout_source.setVerticalSpacing(10)
+        layout_source.setHorizontalSpacing(14)
         layout_source.setColumnStretch(0, 0)
         layout_source.setColumnStretch(1, 1)
+        layout_source.setColumnMinimumWidth(0, 110)
 
         layout_source.addWidget(QLabel("Mode:"), 0, 0)
         self.cbo_mode = QComboBox()
-        self.cbo_mode.setFixedHeight(28)
+        self.cbo_mode.setFixedHeight(32)
         self.cbo_mode.addItems(["Auto — detect hardcoded subtitles", "Always run STT (Whisper)"])
         layout_source.addWidget(self.cbo_mode, 0, 1)
 
         layout_source.addWidget(QLabel("Source Language:"), 1, 0)
         self.cbo_lang = QComboBox()
-        self.cbo_lang.setFixedHeight(28)
+        self.cbo_lang.setFixedHeight(32)
         self.cbo_lang.addItems(["auto (Auto Detect)", "zh (Chinese)", "en (English)"])
         layout_source.addWidget(self.cbo_lang, 1, 1)
         left_col.addWidget(grp_source)
@@ -219,18 +236,21 @@ class MainWindow(QMainWindow):
         # Group ③ Translation
         grp_trans = QGroupBox("③ Translation")
         layout_trans = QGridLayout(grp_trans)
-        layout_trans.setVerticalSpacing(8)
-        layout_trans.setHorizontalSpacing(10)
+        layout_trans.setContentsMargins(16, 18, 16, 14)
+        layout_trans.setVerticalSpacing(10)
+        layout_trans.setHorizontalSpacing(14)
         layout_trans.setColumnStretch(0, 0)
         layout_trans.setColumnStretch(1, 1)
+        layout_trans.setColumnMinimumWidth(0, 110)
 
         layout_trans.addWidget(QLabel("Translate With:"), 0, 0)
         h_model = QHBoxLayout()
+        h_model.setSpacing(6)
         self.txt_model = QLineEdit(Config.LLM_MODEL)
-        self.txt_model.setFixedHeight(28)
+        self.txt_model.setFixedHeight(32)
         self.txt_model.setReadOnly(True)
         self.btn_change_model = QPushButton("Change...")
-        self.btn_change_model.setFixedHeight(28)
+        self.btn_change_model.setFixedHeight(32)
         self.btn_change_model.clicked.connect(self.action_change_model)
         h_model.addWidget(self.txt_model)
         h_model.addWidget(self.btn_change_model)
@@ -238,13 +258,13 @@ class MainWindow(QMainWindow):
 
         layout_trans.addWidget(QLabel("Engine Mode:"), 1, 0)
         self.cbo_trans_mode = QComboBox()
-        self.cbo_trans_mode.setFixedHeight(28)
+        self.cbo_trans_mode.setFixedHeight(32)
         self.cbo_trans_mode.addItems(["Fast — Parallel", "Sequential — Accurate"])
         layout_trans.addWidget(self.cbo_trans_mode, 1, 1)
 
         layout_trans.addWidget(QLabel("Genre:"), 2, 0)
         self.cbo_genre = QComboBox()
-        self.cbo_genre.setFixedHeight(28)
+        self.cbo_genre.setFixedHeight(32)
         self.cbo_genre.addItems([
             "Daily Life / Social Media",
             "Humor / Comedy",
@@ -256,7 +276,7 @@ class MainWindow(QMainWindow):
 
         layout_trans.addWidget(QLabel("Custom Terms:"), 3, 0)
         self.txt_custom_terms = QLineEdit()
-        self.txt_custom_terms.setFixedHeight(28)
+        self.txt_custom_terms.setFixedHeight(32)
         self.txt_custom_terms.setPlaceholderText("Rules/Names, e.g., Luffy: Lu; Douyin: TikTok")
         layout_trans.addWidget(self.txt_custom_terms, 3, 1)
         left_col.addWidget(grp_trans)
@@ -265,56 +285,71 @@ class MainWindow(QMainWindow):
 
         # --- RIGHT COLUMN: Dubbing & Export ---
         right_col = QVBoxLayout()
+        right_col.setSpacing(12)
 
         # Group ④ Dubbing
         grp_tts = QGroupBox("④ Dubbing")
         layout_tts = QGridLayout(grp_tts)
-        layout_tts.setVerticalSpacing(8)
-        layout_tts.setHorizontalSpacing(10)
+        layout_tts.setContentsMargins(16, 18, 16, 14)
+        layout_tts.setVerticalSpacing(10)
+        layout_tts.setHorizontalSpacing(14)
         layout_tts.setColumnStretch(0, 0)
         layout_tts.setColumnStretch(1, 1)
+        layout_tts.setColumnMinimumWidth(0, 110)
 
         layout_tts.addWidget(QLabel("Voice:"), 0, 0)
         self.cbo_voice = QComboBox()
-        self.cbo_voice.setFixedHeight(28)
+        self.cbo_voice.setFixedHeight(32)
         for label, voice_key in Config.AVAILABLE_VOICES.items():
             self.cbo_voice.addItem(label, voice_key)
         layout_tts.addWidget(self.cbo_voice, 0, 1)
 
-        layout_tts.addWidget(QLabel("Background Ducking:"), 1, 0)
+        # Gom 2 input number (Ducking & Delay) vào 1 hàng ngang
+        layout_tts.addWidget(QLabel("Audio Tuning:"), 1, 0)
+        h_tuning = QHBoxLayout()
+        h_tuning.setSpacing(10)
+
+        lbl_ducking = QLabel("Ducking:")
         self.spn_ducking = QDoubleSpinBox()
-        self.spn_ducking.setFixedHeight(28)
+        self.spn_ducking.setFixedHeight(32)
         self.spn_ducking.setRange(0.0, 1.0)
         self.spn_ducking.setSingleStep(0.02)
         self.spn_ducking.setValue(Config.DEFAULT_DUCKING_VOLUME)
-        layout_tts.addWidget(self.spn_ducking, 1, 1)
 
-        layout_tts.addWidget(QLabel("Delay (sec):"), 2, 0)
+        lbl_delay = QLabel("Delay (s):")
         self.spn_delay = QDoubleSpinBox()
-        self.spn_delay.setFixedHeight(28)
+        self.spn_delay.setFixedHeight(32)
         self.spn_delay.setRange(-2.0, 5.0)
         self.spn_delay.setValue(0.0)
-        layout_tts.addWidget(self.spn_delay, 2, 1)
 
-        layout_tts.addWidget(QLabel("Voice Cloning:"), 3, 0)
+        h_tuning.addWidget(lbl_ducking)
+        h_tuning.addWidget(self.spn_ducking, 1)
+        h_tuning.addWidget(lbl_delay)
+        h_tuning.addWidget(self.spn_delay, 1)
+        layout_tts.addLayout(h_tuning, 1, 1)
+
+        layout_tts.addWidget(QLabel("Voice Cloning:"), 2, 0)
         h_clone = QHBoxLayout()
+        h_clone.setSpacing(6)
         self.txt_clone = QLineEdit()
-        self.txt_clone.setFixedHeight(28)
+        self.txt_clone.setFixedHeight(32)
         self.txt_clone.setPlaceholderText("(Optional) Select reference audio...")
         self.btn_browse_clone = QPushButton("📁")
-        self.btn_browse_clone.setFixedSize(36, 28)
+        self.btn_browse_clone.setFixedSize(38, 32)
         h_clone.addWidget(self.txt_clone)
         h_clone.addWidget(self.btn_browse_clone)
-        layout_tts.addLayout(h_clone, 3, 1)
+        layout_tts.addLayout(h_clone, 2, 1)
         right_col.addWidget(grp_tts)
 
         # Group ⑤ Export
         grp_export = QGroupBox("⑤ Export")
         layout_export = QGridLayout(grp_export)
-        layout_export.setVerticalSpacing(8)
-        layout_export.setHorizontalSpacing(10)
+        layout_export.setContentsMargins(16, 18, 16, 14)
+        layout_export.setVerticalSpacing(10)
+        layout_export.setHorizontalSpacing(14)
         layout_export.setColumnStretch(0, 0)
         layout_export.setColumnStretch(1, 1)
+        layout_export.setColumnMinimumWidth(0, 110)
 
         h_sub_opts = QHBoxLayout()
         self.chk_burn_sub = QCheckBox("Burn translated subtitles into video")
@@ -326,37 +361,44 @@ class MainWindow(QMainWindow):
 
         layout_export.addWidget(QLabel("Font:"), 1, 0)
         h_font = QHBoxLayout()
+        h_font.setSpacing(10)
         self.cbo_font = QComboBox()
-        self.cbo_font.setFixedHeight(28)
+        self.cbo_font.setFixedHeight(32)
         self.cbo_font.addItems(["Arial", "DejaVu Sans Bold", "Montserrat", "Segoe UI"])
+        lbl_size = QLabel("Size:")
+        lbl_size.setFixedWidth(46)
         self.spn_font_size = QSpinBox()
-        self.spn_font_size.setFixedHeight(28)
+        self.spn_font_size.setFixedHeight(32)
         self.spn_font_size.setRange(10, 100)
         self.spn_font_size.setValue(22)
-        h_font.addWidget(self.cbo_font, 2)
-        h_font.addWidget(QLabel("Size:"), 1)
-        h_font.addWidget(self.spn_font_size, 1)
+        h_font.addWidget(self.cbo_font, 3)
+        h_font.addWidget(lbl_size, 0)
+        h_font.addWidget(self.spn_font_size, 2)
         layout_export.addLayout(h_font, 1, 1)
 
         layout_export.addWidget(QLabel("Encoder:"), 2, 0)
         h_enc = QHBoxLayout()
+        h_enc.setSpacing(10)
         self.cbo_encoder = QComboBox()
-        self.cbo_encoder.setFixedHeight(28)
+        self.cbo_encoder.setFixedHeight(32)
         self.cbo_encoder.addItems(["libx264 (CPU)", "copy (Passthrough - Instant)"])
+        lbl_quality = QLabel("Quality:")
+        lbl_quality.setFixedWidth(46)
         self.cbo_quality = QComboBox()
-        self.cbo_quality.setFixedHeight(28)
+        self.cbo_quality.setFixedHeight(32)
         self.cbo_quality.addItems(["Best", "1080p", "720p"])
-        h_enc.addWidget(self.cbo_encoder, 2)
-        h_enc.addWidget(QLabel("Quality:"), 1)
-        h_enc.addWidget(self.cbo_quality, 1)
+        h_enc.addWidget(self.cbo_encoder, 3)
+        h_enc.addWidget(lbl_quality, 0)
+        h_enc.addWidget(self.cbo_quality, 2)
         layout_export.addLayout(h_enc, 2, 1)
 
         layout_export.addWidget(QLabel("Save To:"), 3, 0)
         h_out = QHBoxLayout()
+        h_out.setSpacing(6)
         self.txt_output_dir = QLineEdit(str(Config.OUTPUT_DIR))
-        self.txt_output_dir.setFixedHeight(28)
+        self.txt_output_dir.setFixedHeight(32)
         self.btn_browse_out = QPushButton("Browse...")
-        self.btn_browse_out.setFixedHeight(28)
+        self.btn_browse_out.setFixedHeight(32)
         self.btn_browse_out.clicked.connect(self.action_browse_output_dir)
         h_out.addWidget(self.txt_output_dir)
         h_out.addWidget(self.btn_browse_out)
@@ -369,19 +411,19 @@ class MainWindow(QMainWindow):
         # 5. CONTROL BAR & PROGRESS
         ctrl_layout = QHBoxLayout()
         self.btn_run = QPushButton("▶  Start")
-        self.btn_run.setFixedHeight(34)
-        self.btn_run.setStyleSheet("background-color: #16A34A; color: #FFFFFF; font-weight: bold; font-size: 13px; border-radius: 4px; padding: 0 20px; border: 1px solid #15803D;")
+        self.btn_run.setFixedHeight(36)
+        self.btn_run.setStyleSheet("background-color: #16A34A; color: #FFFFFF; font-weight: bold; font-size: 13px; border-radius: 6px; padding: 0 22px; border: 1px solid #15803D;")
         self.btn_run.clicked.connect(self.action_start_dubbing)
 
         self.btn_stop = QPushButton("■  Stop")
-        self.btn_stop.setFixedHeight(34)
+        self.btn_stop.setFixedHeight(36)
         self.btn_stop.setEnabled(False)
-        self.btn_stop.setStyleSheet("background-color: #DC2626; color: #FFFFFF; font-weight: bold; font-size: 13px; border-radius: 4px; padding: 0 15px; border: 1px solid #B91C1C;")
+        self.btn_stop.setStyleSheet("background-color: #DC2626; color: #FFFFFF; font-weight: bold; font-size: 13px; border-radius: 6px; padding: 0 18px; border: 1px solid #B91C1C;")
         self.btn_stop.clicked.connect(self.action_stop_dubbing)
 
         self.btn_open_folder = QPushButton("📁 Open Result Folder")
-        self.btn_open_folder.setFixedHeight(34)
-        self.btn_open_folder.setStyleSheet("background-color: #FFFFFF; color: #0F172A; font-weight: bold; font-size: 12px; border-radius: 4px; padding: 0 14px; border: 1px solid #CBD5E1;")
+        self.btn_open_folder.setFixedHeight(36)
+        self.btn_open_folder.setStyleSheet("background-color: #FFFFFF; color: #0F172A; font-weight: bold; font-size: 12px; border-radius: 6px; padding: 0 16px; border: 1px solid #CBD5E1;")
         self.btn_open_folder.clicked.connect(self.action_open_output_folder)
 
         self.lbl_stats = QLabel("Ready to process")
@@ -416,15 +458,15 @@ class MainWindow(QMainWindow):
         # 6. TERMINAL CONSOLE LOG VIEWER
         self.txt_console = QTextEdit()
         self.txt_console.setReadOnly(True)
-        self.txt_console.setFixedHeight(140)
+        self.txt_console.setFixedHeight(150)
         self.txt_console.setFont(QFont("Consolas", 10))
         self.txt_console.setStyleSheet("""
             QTextEdit {
                 background-color: #111111;
                 color: #00FF66;
                 border: 1px solid #333333;
-                border-radius: 4px;
-                padding: 6px;
+                border-radius: 6px;
+                padding: 6px 10px;
             }
         """)
         self.append_log("=== AutoDub Studio Initialized ===")
@@ -435,127 +477,172 @@ class MainWindow(QMainWindow):
 
     def apply_styles(self):
         """Apply high-contrast, polished stylesheet compatible with both Light and Dark Windows themes."""
-        self.setStyleSheet("""
-            QMainWindow {
+        icon_up = (Config.BASE_DIR / "assets" / "icons" / "arrow_up.svg").resolve().as_posix()
+        icon_down = (Config.BASE_DIR / "assets" / "icons" / "arrow_down.svg").resolve().as_posix()
+
+        self.setStyleSheet(f"""
+            QMainWindow {{
                 background-color: #F1F5F9;
-            }
-            QWidget {
+            }}
+            QWidget {{
                 color: #0F172A;
                 font-family: "Segoe UI", Arial, sans-serif;
-            }
-            QTabWidget::pane {
+            }}
+            QTabWidget::pane {{
                 border: 1px solid #CBD5E1;
                 background-color: #F8FAFC;
-                border-radius: 4px;
-            }
-            QTabBar::tab {
+                border-radius: 6px;
+            }}
+            QTabBar::tab {{
                 background-color: #E2E8F0;
                 color: #334155;
                 font-weight: bold;
-                padding: 7px 18px;
-                border-top-left-radius: 5px;
-                border-top-right-radius: 5px;
+                padding: 8px 20px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
                 margin-right: 3px;
                 border: 1px solid #CBD5E1;
                 border-bottom: none;
-            }
-            QTabBar::tab:selected {
+            }}
+            QTabBar::tab:selected {{
                 background-color: #FFFFFF;
                 color: #0F172A;
                 border: 1px solid #CBD5E1;
                 border-bottom: 1px solid #FFFFFF;
-            }
-            QGroupBox {
+            }}
+            QGroupBox {{
                 font-weight: bold;
                 font-size: 13px;
                 border: 1px solid #CBD5E1;
-                border-radius: 6px;
+                border-radius: 8px;
                 margin-top: 10px;
-                padding-top: 18px;
+                padding-top: 16px;
                 background-color: #FFFFFF;
                 color: #0F172A;
-            }
-            QGroupBox::title {
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                left: 10px;
+                left: 14px;
                 padding: 0 6px;
                 background-color: #FFFFFF;
                 color: #0F172A;
-            }
-            QLabel {
+            }}
+            QLabel {{
                 color: #1E293B;
                 font-size: 12px;
-            }
-            QCheckBox {
+            }}
+            QCheckBox {{
                 color: #1E293B;
                 font-size: 12px;
                 spacing: 6px;
-            }
-            QCheckBox::indicator {
+            }}
+            QCheckBox::indicator {{
                 width: 16px;
                 height: 16px;
                 border: 1px solid #94A3B8;
                 border-radius: 3px;
                 background-color: #FFFFFF;
-            }
-            QCheckBox::indicator:checked {
+            }}
+            QCheckBox::indicator:checked {{
                 background-color: #2563EB;
                 border-color: #2563EB;
-            }
-            QPushButton {
+            }}
+            QPushButton {{
                 background-color: #FFFFFF;
                 color: #0F172A;
                 border: 1px solid #CBD5E1;
-                border-radius: 4px;
-                padding: 5px 12px;
-                min-height: 24px;
+                border-radius: 6px;
+                padding: 4px 12px;
                 font-size: 12px;
                 font-weight: 500;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #F1F5F9;
                 border-color: #64748B;
                 color: #0F172A;
-            }
-            QPushButton:pressed {
+            }}
+            QPushButton:pressed {{
                 background-color: #E2E8F0;
-            }
-            QPushButton:disabled {
+            }}
+            QPushButton:disabled {{
                 background-color: #F8FAFC;
                 color: #94A3B8;
                 border-color: #E2E8F0;
-            }
-            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox {
+            }}
+            QLineEdit, QComboBox {{
                 border: 1px solid #CBD5E1;
-                border-radius: 4px;
-                padding: 2px 8px;
+                border-radius: 6px;
+                padding: 4px 10px;
                 background-color: #FFFFFF;
                 color: #0F172A;
                 font-size: 12px;
-            }
-            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus {
+            }}
+            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus {{
                 border: 1px solid #2563EB;
                 background-color: #FFFFFF;
-            }
-            QComboBox QAbstractItemView {
+            }}
+            QDoubleSpinBox, QSpinBox {{
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 4px 24px 4px 10px;
+                background-color: #FFFFFF;
+                color: #0F172A;
+                font-size: 12px;
+            }}
+            QDoubleSpinBox::up-button, QSpinBox::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 22px;
+                height: 15px;
+                border-left: 1px solid #CBD5E1;
+                border-bottom: 1px solid #CBD5E1;
+                border-top-right-radius: 5px;
+                background-color: #F8FAFC;
+            }}
+            QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover {{
+                background-color: #E2E8F0;
+            }}
+            QDoubleSpinBox::up-arrow, QSpinBox::up-arrow {{
+                image: url("{icon_up}");
+                width: 8px;
+                height: 6px;
+            }}
+            QDoubleSpinBox::down-button, QSpinBox::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 22px;
+                height: 15px;
+                border-left: 1px solid #CBD5E1;
+                border-bottom-right-radius: 5px;
+                background-color: #F8FAFC;
+            }}
+            QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {{
+                background-color: #E2E8F0;
+            }}
+            QDoubleSpinBox::down-arrow, QSpinBox::down-arrow {{
+                image: url("{icon_down}");
+                width: 8px;
+                height: 6px;
+            }}
+            QComboBox QAbstractItemView {{
                 background-color: #FFFFFF;
                 color: #0F172A;
                 border: 1px solid #CBD5E1;
                 selection-background-color: #E0F2FE;
                 selection-color: #0F172A;
                 padding: 4px;
-            }
-            QTableWidget {
+            }}
+            QTableWidget {{
                 background-color: #FFFFFF;
                 color: #0F172A;
                 border: 1px solid #CBD5E1;
-                border-radius: 4px;
+                border-radius: 6px;
                 gridline-color: #E2E8F0;
                 selection-background-color: #E0F2FE;
                 selection-color: #0F172A;
-            }
-            QHeaderView::section {
+            }}
+            QHeaderView::section {{
                 background-color: #F8FAFC;
                 color: #334155;
                 font-weight: bold;
@@ -563,28 +650,28 @@ class MainWindow(QMainWindow):
                 border-bottom: 1px solid #CBD5E1;
                 border-right: 1px solid #E2E8F0;
                 padding: 6px;
-            }
-            QDialog, QMessageBox, QInputDialog, QFileDialog {
+            }}
+            QDialog, QMessageBox, QInputDialog, QFileDialog {{
                 background-color: #FFFFFF;
                 color: #0F172A;
-            }
-            QMessageBox QLabel, QDialog QLabel {
+            }}
+            QMessageBox QLabel, QDialog QLabel {{
                 color: #0F172A;
                 font-size: 13px;
                 font-weight: 500;
-            }
-            QMessageBox QPushButton, QDialog QPushButton {
+            }}
+            QMessageBox QPushButton, QDialog QPushButton {{
                 background-color: #0F172A;
                 color: #FFFFFF;
                 font-weight: bold;
                 font-size: 12px;
-                border-radius: 4px;
+                border-radius: 6px;
                 padding: 6px 20px;
                 min-width: 75px;
-            }
-            QMessageBox QPushButton:hover, QDialog QPushButton:hover {
+            }}
+            QMessageBox QPushButton:hover, QDialog QPushButton:hover {{
                 background-color: #334155;
-            }
+            }}
         """)
 
     def append_log(self, text: str):
