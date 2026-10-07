@@ -76,6 +76,7 @@ class DubbingWorker(QThread):
             try:
                 final_video = run_pipeline(
                     source=source,
+                    source_lang=self.options.get("source_lang", "auto"),
                     voice=self.options.get("voice"),
                     ducking_volume=self.options.get("ducking_volume", 0.10),
                     burn_subtitles=self.options.get("burn_subtitles", True),
@@ -527,6 +528,27 @@ class MainWindow(QMainWindow):
                 border-right: 1px solid #E2E8F0;
                 padding: 6px;
             }
+            QDialog, QMessageBox, QInputDialog, QFileDialog {
+                background-color: #FFFFFF;
+                color: #0F172A;
+            }
+            QMessageBox QLabel, QDialog QLabel {
+                color: #0F172A;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QMessageBox QPushButton, QDialog QPushButton {
+                background-color: #0F172A;
+                color: #FFFFFF;
+                font-weight: bold;
+                font-size: 12px;
+                border-radius: 4px;
+                padding: 6px 20px;
+                min-width: 75px;
+            }
+            QMessageBox QPushButton:hover, QDialog QPushButton:hover {
+                background-color: #334155;
+            }
         """)
 
     def append_log(self, text: str):
@@ -629,8 +651,17 @@ class MainWindow(QMainWindow):
             source = self.table_queue.item(row, 0).text().strip()
             tasks.append({"row": row, "source": source})
 
+        selected_lang_text = self.cbo_lang.currentText().lower()
+        if "zh" in selected_lang_text:
+            source_lang = "zh"
+        elif "en" in selected_lang_text:
+            source_lang = "en"
+        else:
+            source_lang = "auto"
+
         voice_key = self.cbo_voice.currentData()
         options = {
+            "source_lang": source_lang,
             "voice": voice_key,
             "ducking_volume": self.spn_ducking.value(),
             "burn_subtitles": self.chk_burn_sub.isChecked(),
@@ -675,17 +706,29 @@ class MainWindow(QMainWindow):
         self.btn_run.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.lbl_stats.setText(f"Completed: {success_count}/{total_count} video(s)")
-        QMessageBox.information(
-            self,
-            "Finished",
-            f"Batch processing completed!\nSuccessful: {success_count}/{total_count} video(s)."
-        )
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Finished")
+        if success_count == total_count and total_count > 0:
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setText(f"Batch processing completed successfully!\nAll {success_count}/{total_count} video(s) dubbed and exported.")
+        elif success_count > 0:
+            msg_box.setIcon(QMessageBox.Warning)
+            msg_box.setText(f"Batch processing finished with partial results.\nSuccessful: {success_count}/{total_count} video(s).")
+        else:
+            msg_box.setIcon(QMessageBox.Critical)
+            msg_box.setText(f"Batch processing completed.\nSuccessful: {success_count}/{total_count} video(s).\nPlease check the terminal log below for details.")
+        
+        msg_box.setStyleSheet("background-color: #FFFFFF; color: #0F172A; font-size: 13px;")
+        msg_box.exec()
 
 
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     window = MainWindow()
+    # Áp dụng stylesheet trực tiếp lên toàn bộ QApplication để mọi dialog, alert đều sắc nét
+    app.setStyleSheet(window.styleSheet())
     window.show()
     sys.exit(app.exec())
 

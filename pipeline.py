@@ -27,10 +27,11 @@ from core.audio_mixer import generate_ass_file, create_mixed_audio_track, render
 
 def run_pipeline(
     source: str,
+    source_lang: Optional[str] = "auto",
     voice: Optional[str] = None,
     ducking_volume: float = 0.10,
     burn_subtitles: bool = True,
-    genre: str = "Đời sống / Mạng xã hội",
+    genre: str = "Daily Life / Social Media",
     custom_terms: str = "",
     output_dir: Optional[Path] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None
@@ -60,50 +61,51 @@ def run_pipeline(
         else:
             print(f"[{percent:5.1f}%] {msg}")
 
-    # BƯỚC 1: Tải video hoặc lấy file cục bộ
-    report("Bước 1/6: Đang chuẩn bị và nạp video đầu vào...", 5.0)
-    video_path = download_video(source, progress_callback=lambda m, p: report(f"Bước 1/6: {m}", 5.0 + p * 0.15))
+    # STEP 1: Download or load local video
+    report("Step 1/6: Preparing and loading input video...", 5.0)
+    video_path = download_video(source, progress_callback=lambda m, p: report(f"Step 1/6: {m}", 5.0 + p * 0.15))
 
-    # BƯỚC 2: Trích xuất âm thanh sang định dạng WAV 16kHz
-    report("Bước 2/6: Đang trích xuất âm thanh từ video...", 20.0)
+    # STEP 2: Extract audio to 16kHz mono WAV
+    report("Step 2/6: Extracting audio from video...", 20.0)
     raw_audio_path = Config.TEMP_DIR / f"{video_path.stem}_raw.wav"
     extract_audio(video_path, raw_audio_path)
 
-    # BƯỚC 3: Nhận diện giọng nói và mốc thời gian (STT)
-    report("Bước 3/6: Đang nhận diện giọng nói và bóc tách câu thoại...", 35.0)
+    # STEP 3: Speech-to-Text with word timestamps
+    report("Step 3/6: Transcribing speech and timestamps with Whisper...", 35.0)
+    whisper_lang = None if (not source_lang or source_lang.lower() in ("auto", "none")) else source_lang.lower()
     segments = transcribe_audio(
         raw_audio_path,
-        language="zh", # Có thể chỉnh 'auto' nếu video không rõ tiếng
+        language=whisper_lang,
         word_timestamps=True,
-        progress_callback=lambda m, p: report(f"Bước 3/6: {m}", 35.0 + p * 0.15)
+        progress_callback=lambda m, p: report(f"Step 3/6: {m}", 35.0 + p * 0.15)
     )
 
     if not segments:
-        raise ValueError("Không phát hiện được bất kỳ câu thoại nào trong video này.")
+        raise ValueError("No speech or dialogue detected in this video.")
 
-    # BƯỚC 4: Dịch thuật ngữ cảnh bằng LLM
-    report("Bước 4/6: Đang dịch thuật và tối ưu câu thoại với LLM...", 55.0)
+    # STEP 4: Contextual LLM translation
+    report("Step 4/6: Translating dialogues with LLM...", 55.0)
     translated_segments = translate_segments(
         segments,
-        source_lang="Tiếng Trung",
-        target_lang="Tiếng Việt",
+        source_lang="Chinese" if whisper_lang == "zh" else "Original Language",
+        target_lang="Vietnamese",
         genre=genre,
         custom_terms=custom_terms,
-        progress_callback=lambda m, p: report(f"Bước 4/6: {m}", 55.0 + p * 0.10)
+        progress_callback=lambda m, p: report(f"Step 4/6: {m}", 55.0 + p * 0.10)
     )
 
-    # BƯỚC 5: Sinh giọng lồng tiếng AI và đồng bộ thời lượng
-    report("Bước 5/6: Đang tạo giọng đọc AI tiếng Việt và căn chỉnh tốc độ...", 68.0)
+    # STEP 5: AI voice synthesis and atempo synchronization
+    report("Step 5/6: Synthesizing AI voice dubbing and syncing tempo...", 68.0)
     dubbed_segments = process_dubbing_segments(
         translated_segments,
         voice=voice,
-        progress_callback=lambda m, p: report(f"Bước 5/6: {m}", 68.0 + p * 0.17)
+        progress_callback=lambda m, p: report(f"Step 5/6: {m}", 68.0 + p * 0.17)
     )
 
-    # BƯỚC 6: Hòa âm và Render video thành phẩm
-    report("Bước 6/6: Đang hòa âm (Audio Ducking) và xuất video cuối cùng...", 88.0)
+    # STEP 6: Audio ducking and video rendering
+    report("Step 6/6: Mixing audio and rendering final video...", 88.0)
     
-    # 6a. Tạo track âm thanh hòa trộn
+    # 6a. Create mixed audio track
     mixed_audio_file = Config.TEMP_DIR / f"{video_path.stem}_mixed.mp3"
     create_mixed_audio_track(
         raw_audio_path,
@@ -112,13 +114,13 @@ def run_pipeline(
         ducking_volume=ducking_volume
     )
 
-    # 6b. Tạo file phụ đề ASS nếu được yêu cầu
+    # 6b. Generate ASS subtitle file if requested
     ass_file = None
     if burn_subtitles:
         ass_file = Config.TEMP_DIR / f"{video_path.stem}_sub.ass"
         generate_ass_file(dubbed_segments, ass_file)
 
-    # 6c. Render video thành phẩm
+    # 6c. Render finalized video
     final_video_name = f"{video_path.stem}_vi.mp4"
     final_video_path = target_out_dir / final_video_name
 
@@ -127,10 +129,10 @@ def run_pipeline(
         mixed_audio_file,
         final_video_path,
         ass_subtitle_path=ass_file,
-        progress_callback=lambda m, p: report(f"Bước 6/6: {m}", 90.0 + p * 0.10)
+        progress_callback=lambda m, p: report(f"Step 6/6: {m}", 90.0 + p * 0.10)
     )
 
-    report(f"Hoàn thành toàn bộ quy trình! Video đã lưu tại: {final_video_path}", 100.0)
+    report(f"Pipeline completed! Video successfully saved to: {final_video_path}", 100.0)
     return final_video_path
 
 

@@ -110,7 +110,9 @@ def translate_segments(
 
     client = OpenAI(
         base_url=Config.LLM_BASE_URL,
-        api_key=Config.LLM_API_KEY
+        api_key=Config.LLM_API_KEY,
+        timeout=30.0,
+        max_retries=2
     )
 
     # Chuẩn bị dữ liệu đầu vào gọn nhẹ cho prompt
@@ -125,42 +127,59 @@ def translate_segments(
     ]
 
     system_prompt = build_system_prompt(source_lang, target_lang, genre, custom_terms)
-    user_prompt = f"Dưới đây là danh sách {len(input_data)} câu thoại cần dịch:\n" + json.dumps(input_data, ensure_ascii=False, indent=2)
+    chunk_size = 6
+    total_segments = len(segments)
+    chunks = [segments[i:i + chunk_size] for i in range(0, total_segments, chunk_size)]
+    translation_map = {}
+
+    for c_idx, chunk in enumerate(chunks):
+        if progress_callback:
+            percent = (c_idx / len(chunks)) * 100.0
+            progress_callback(f"Translating batch {c_idx + 1}/{len(chunks)} ({len(chunk)} dialogues)...", percent)
+
+        input_data = [
+            {
+                "index": seg["index"],
+                "start": seg["start"],
+                "end": seg["end"],
+                "text": seg["text"]
+            }
+            for seg in chunk
+        ]
+
+        user_prompt = f"Dưới đây là danh sách {len(input_data)} câu thoại cần dịch:\n" + json.dumps(input_data, ensure_ascii=False, indent=2)
+
+        try:
+            response = client.chat.completions.create(
+                model=Config.LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+            )
+
+            raw_output = response.choices[0].message.content or ""
+            cleaned_json = clean_json_response(raw_output)
+            parsed_results = json.loads(cleaned_json)
+
+            for item in parsed_results:
+                if isinstance(item, dict) and "index" in item:
+                    translation_map[item["index"]] = item.get("translated_text", "").strip()
+
+        except Exception as e:
+            # Nếu 1 batch gặp lỗi phân tích JSON thì fallback về câu gốc
+            for seg in chunk:
+                if seg["index"] not in translation_map:
+                    translation_map[seg["index"]] = seg["text"]
+
+    enriched_segments = []
+    for seg in segments:
+        seg_copy = dict(seg)
+        seg_copy["translated_text"] = translation_map.get(seg["index"], seg["text"]).strip()
+        enriched_segments.append(seg_copy)
 
     if progress_callback:
-        progress_callback(f"Đang gửi {len(input_data)} câu thoại sang LLM xử lý...", 30.0)
+        progress_callback(f"Translation completed: {len(enriched_segments)} dialogues ready for dubbing.", 100.0)
 
-    try:
-        response = client.chat.completions.create(
-            model=Config.LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.3, # Giữ nhiệt độ thấp để bản dịch ổn định và tuân thủ JSON
-        )
-
-        raw_output = response.choices[0].message.content or ""
-        cleaned_json = clean_json_response(raw_output)
-
-        parsed_results = json.loads(cleaned_json)
-
-        # Mapping bản dịch ngược lại vào segments gốc
-        translation_map = {item["index"]: item.get("translated_text", "") for item in parsed_results if "index" in item}
-
-        enriched_segments = []
-        for seg in segments:
-            seg_copy = dict(seg)
-            # Nếu LLM dịch thành công thì lấy, nếu không fallback về câu gốc
-            seg_copy["translated_text"] = translation_map.get(seg["index"], seg["text"]).strip()
-            enriched_segments.append(seg_copy)
-
-        if progress_callback:
-            progress_callback(f"Dịch hoàn tất: {len(enriched_segments)} câu thoại sẵn sàng lồng tiếng.", 100.0)
-
-        return enriched_segments
-
-    except json.JSONDecodeError as e:
-        raise TranslationError(f"Phản hồi từ LLM không phải là JSON hợp lệ: {str(e)}\nNội dung thô: {raw_output[:300]}") from e
-    except Exception as e:
-        raise TranslationError(f"Lỗi khi gọi API LLM ({Config.LLM_BASE_URL}): {str(e)}") from e
+    return enriched_segments

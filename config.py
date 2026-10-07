@@ -6,6 +6,10 @@ Tệp quản lý cấu hình tập trung cho AutoSub Dubbing Studio.
 import os
 from pathlib import Path
 
+# Vô hiệu hóa cảnh báo symlink của HuggingFace trên Windows
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("PYTHONUTF8", "1")
+
 # Thử nạp biến môi trường từ tệp .env nếu thư viện python-dotenv đã được cài đặt
 env_path = Path(__file__).resolve().parent / ".env"
 try:

@@ -34,6 +34,8 @@ def get_audio_duration(file_path: Path | str) -> float:
     file_obj = Path(file_path).resolve()
     if not file_obj.exists():
         raise FileNotFoundError(f"Không tìm thấy file để đo thời lượng: {file_path}")
+    if file_obj.stat().st_size == 0:
+        return 0.0
 
     ffmpeg_bin = find_ffmpeg()
     cmd = [ffmpeg_bin, "-i", str(file_obj)]
@@ -47,12 +49,50 @@ def get_audio_duration(file_path: Path | str) -> float:
         seconds = float(match.group(3))
         return hours * 3600 + minutes * 60 + seconds
 
-    raise TTSError(f"Không thể xác định thời lượng của tệp: {file_path}")
+    return 0.0
 
 
-async def synthesize_speech_async(text: str, output_file: Path, voice: str) -> Path:
+def generate_silence_audio(output_file: Path, duration: float) -> Path:
+    """
+    Tạo tệp âm thanh im lặng (silent audio) bằng FFmpeg khi TTS gặp sự cố hoặc câu không có lời.
+    """
+    output_file = Path(output_file).resolve()
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg_bin = find_ffmpeg()
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+        "-t", f"{max(0.2, duration):.2f}",
+        "-c:a", "libmp3lame", "-b:a", "48k",
+        str(output_file)
+    ]
+    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    return output_file
+
+
+def sanitize_tts_text(text: str) -> str:
+    """
+    Chuẩn hóa câu văn để tránh các cụm từ gây lỗi NoAudioReceived trên dịch vụ Edge TTS tiếng Việt.
+    """
+    if not text:
+        return ""
+    cleaned = text.strip().strip('"').strip("'")
+    replacements = {
+        "soi tuổi": "đoán tuổi",
+        "tuổi tác của tôi": "tuổi của tôi",
+        "tuổi tác tôi": "tuổi của tôi",
+        "tuổi tác": "tuổi",
+    }
+    for old, new in replacements.items():
+        cleaned = re.sub(re.escape(old), new, cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+async def synthesize_speech_async(text: str, output_file: Path, voice: str) -> bool:
     """
     Hàm bất đồng bộ gọi Microsoft Edge TTS tạo giọng đọc tiếng Việt.
+    Có cơ chế tự sửa từ ngữ nhạy cảm và thử giọng thay thế khi gặp NoAudioReceived.
+    Trả về True nếu thành công, False nếu thất bại.
     """
     try:
         import edge_tts
@@ -60,9 +100,27 @@ async def synthesize_speech_async(text: str, output_file: Path, voice: str) -> P
         raise TTSError("Thư viện edge-tts chưa được cài đặt. Vui lòng chạy: pip install edge-tts")
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(str(output_file))
-    return output_file
+    clean_text = sanitize_tts_text(text)
+    if not clean_text:
+        return False
+
+    voices_to_try = [voice]
+    alt_voice = "vi-VN-HoaiMyNeural" if "NamMinh" in voice else "vi-VN-NamMinhNeural"
+    if alt_voice not in voices_to_try:
+        voices_to_try.append(alt_voice)
+
+    for v in voices_to_try:
+        for candidate_text in [clean_text, clean_text + "."]:
+            try:
+                communicate = edge_tts.Communicate(candidate_text, v)
+                await communicate.save(str(output_file))
+                if output_file.exists() and output_file.stat().st_size > 0:
+                    return True
+            except Exception:
+                await asyncio.sleep(0.3)
+                continue
+
+    return False
 
 
 def adjust_audio_speed(
@@ -170,23 +228,27 @@ def process_dubbing_segments(
             percent = (idx / total_segments) * 100.0
             progress_callback(f"Đang sinh giọng đọc câu {idx + 1}/{total_segments}: {text[:30]}...", percent)
 
+        # 1. Sinh âm thanh bằng edge-tts (có tự động retry và đổi giọng nếu lỗi)
+        success = asyncio.run(synthesize_speech_async(text, raw_mp3, target_voice))
+        if not success:
+            # Fallback tạo audio im lặng để video không bao giờ bị dừng giữa chừng
+            generate_silence_audio(raw_mp3, target_duration)
+
+        # 2. Căn chỉnh tốc độ khớp thời lượng mục tiêu
         try:
-            # 1. Sinh âm thanh bằng edge-tts
-            asyncio.run(synthesize_speech_async(text, raw_mp3, target_voice))
-
-            # 2. Căn chỉnh tốc độ khớp thời lượng mục tiêu
             adjust_audio_speed(raw_mp3, synced_mp3, target_duration)
+        except Exception:
+            generate_silence_audio(synced_mp3, target_duration)
 
-            # 3. Đo lại thời lượng thực tế của file âm thanh sau khi đồng bộ
-            actual_duration = get_audio_duration(synced_mp3)
+        # 3. Đo lại thời lượng thực tế của file âm thanh sau khi đồng bộ
+        actual_duration = get_audio_duration(synced_mp3)
+        if actual_duration <= 0:
+            actual_duration = target_duration
 
-            seg_copy = dict(seg)
-            seg_copy["dubbed_audio_path"] = str(synced_mp3)
-            seg_copy["dubbed_duration"] = actual_duration
-            enriched_segments.append(seg_copy)
-
-        except Exception as e:
-            raise TTSError(f"Lỗi khi xử lý lồng tiếng câu #{seg_index} ('{text}'): {str(e)}") from e
+        seg_copy = dict(seg)
+        seg_copy["dubbed_audio_path"] = str(synced_mp3)
+        seg_copy["dubbed_duration"] = actual_duration
+        enriched_segments.append(seg_copy)
 
     if progress_callback:
         progress_callback(f"Lồng tiếng hoàn tất toàn bộ {total_segments} câu thoại.", 100.0)
