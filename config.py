@@ -7,17 +7,25 @@ import os
 from pathlib import Path
 
 # Thử nạp biến môi trường từ tệp .env nếu thư viện python-dotenv đã được cài đặt
+env_path = Path(__file__).resolve().parent / ".env"
 try:
     from dotenv import load_dotenv
-    # Nạp từ file .env nằm cùng thư mục gốc của dự án
-    env_path = Path(__file__).resolve().parent / ".env"
     if env_path.exists():
         load_dotenv(dotenv_path=env_path)
     else:
         load_dotenv()
 except ImportError:
-    # Nếu chưa cài python-dotenv, vẫn tiếp tục bằng biến môi trường hệ thống
-    pass
+    # Bộ đọc tệp .env thủ công dự phòng nếu chưa cài python-dotenv
+    if env_path.exists():
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    key = key.strip()
+                    val = val.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = val
 
 
 class Config:
@@ -32,10 +40,14 @@ class Config:
     # Thư mục xuất video kết quả mặc định
     OUTPUT_DIR: Path = BASE_DIR / os.getenv("DEFAULT_OUTPUT_DIR", "output")
 
-    # Cấu hình API LLM (Chuẩn OpenAI-compatible)
-    LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gemma3:4b")
-    LLM_API_KEY: str = os.getenv("LLM_API_KEY", "no-key-required")
+    # Cấu hình API LLM (Chuẩn OpenAI-compatible, hỗ trợ cả alias VNPT)
+    _raw_url = os.getenv("LLM_BASE_URL") or os.getenv("VNPT_LLM_URL", "http://localhost:11434/v1")
+    if _raw_url.endswith("/chat/completions"):
+        _raw_url = _raw_url[:-len("/chat/completions")]
+    LLM_BASE_URL: str = _raw_url
+
+    LLM_MODEL: str = os.getenv("LLM_MODEL") or os.getenv("VNPT_LLM_MODEL", "google/gemma-4-26B-A4B-it")
+    LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("VNPT_LLM_API_KEY", "no-key-required")
 
     # Cấu hình Whisper Speech-to-Text
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
