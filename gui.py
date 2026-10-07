@@ -97,230 +97,7 @@ class DubbingWorker(QThread):
 
         self.sig_progress.emit(100.0)
         self.sig_log.emit(f"\n=== FINISHED: {success_count}/{total} VIDEOS SUCCESSFUL ===")
-class LLMConfigDialog(QDialog):
-    """
-    Modal dialog allowing users to configure LLM Provider, Base URL, API Key,
-    and Model Name with test connection ping and persistent saving to .env.
-    """
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("⚙️ LLM Configuration")
-        self.setFixedSize(540, 420)
-        self.setModal(True)
 
-        self.PRESETS = {
-            "Custom Settings": {
-                "base_url": Config.LLM_BASE_URL,
-                "api_key": Config.LLM_API_KEY,
-                "model": Config.LLM_MODEL
-            },
-            "VNPT-SI AI Gateway": {
-                "base_url": "https://llm.vnptsi.vn/v1",
-                "api_key": Config.LLM_API_KEY if "vnptsi" in Config.LLM_BASE_URL else "no-key-required",
-                "model": "google/gemma-4-26B-A4B-it"
-            },
-            "Ollama (Local - http://localhost:11434/v1)": {
-                "base_url": "http://localhost:11434/v1",
-                "api_key": "ollama",
-                "model": "gemma3:4b"
-            },
-            "OpenAI Official (https://api.openai.com/v1)": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "",
-                "model": "gpt-4o-mini"
-            },
-            "Groq Cloud (https://api.groq.com/openai/v1)": {
-                "base_url": "https://api.groq.com/openai/v1",
-                "api_key": "",
-                "model": "llama-3.3-70b-versatile"
-            },
-            "DeepSeek API (https://api.deepseek.com/v1)": {
-                "base_url": "https://api.deepseek.com/v1",
-                "api_key": "",
-                "model": "deepseek-chat"
-            }
-        }
-
-        self.init_ui()
-        self.apply_dialog_styles()
-
-    def apply_dialog_styles(self):
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #F8FAFC;
-                color: #0F172A;
-            }
-            QLabel {
-                color: #0F172A;
-                font-size: 12px;
-            }
-            QLineEdit, QComboBox {
-                border: 1px solid #CBD5E1;
-                border-radius: 6px;
-                padding: 4px 10px;
-                background-color: #FFFFFF;
-                color: #0F172A;
-                font-size: 12px;
-            }
-            QLineEdit:focus, QComboBox:focus {
-                border: 1px solid #2563EB;
-                background-color: #FFFFFF;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #FFFFFF;
-                color: #0F172A;
-                border: 1px solid #CBD5E1;
-                selection-background-color: #E0F2FE;
-                selection-color: #0369A1;
-            }
-            QPushButton {
-                font-size: 12px;
-            }
-        """)
-
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(14)
-
-        header_lbl = QLabel("<b>LLM Service & Model Settings</b>")
-        header_lbl.setStyleSheet("font-size: 15px; color: #0F172A;")
-        layout.addWidget(header_lbl)
-
-        sub_lbl = QLabel("Configure your OpenAI-compatible endpoint. Settings are saved permanently to .env.")
-        sub_lbl.setStyleSheet("font-size: 11px; color: #64748B; margin-bottom: 2px;")
-        sub_lbl.setWordWrap(True)
-        layout.addWidget(sub_lbl)
-
-        form_layout = QGridLayout()
-        form_layout.setVerticalSpacing(12)
-        form_layout.setHorizontalSpacing(12)
-
-        # Provider Preset
-        form_layout.addWidget(QLabel("Provider:"), 0, 0)
-        self.cbo_preset = QComboBox()
-        self.cbo_preset.setFixedHeight(32)
-        self.cbo_preset.addItems(list(self.PRESETS.keys()))
-        self.cbo_preset.currentTextChanged.connect(self.on_preset_changed)
-        form_layout.addWidget(self.cbo_preset, 0, 1)
-
-        # Base URL
-        form_layout.addWidget(QLabel("Base URL:"), 1, 0)
-        self.txt_url = QLineEdit(Config.LLM_BASE_URL)
-        self.txt_url.setFixedHeight(32)
-        self.txt_url.setPlaceholderText("https://api.openai.com/v1")
-        form_layout.addWidget(self.txt_url, 1, 1)
-
-        # API Key
-        form_layout.addWidget(QLabel("API Key:"), 2, 0)
-        h_key = QHBoxLayout()
-        h_key.setSpacing(6)
-        self.txt_key = QLineEdit(Config.LLM_API_KEY)
-        self.txt_key.setFixedHeight(32)
-        self.txt_key.setEchoMode(QLineEdit.Password)
-        self.txt_key.setPlaceholderText("sk-... or no-key-required")
-        self.btn_toggle_key = QPushButton("👁️")
-        self.btn_toggle_key.setFixedSize(36, 32)
-        self.btn_toggle_key.setToolTip("Show / Hide API Key")
-        self.btn_toggle_key.setStyleSheet("background-color: #F8FAFC; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px;")
-        self.btn_toggle_key.clicked.connect(self.toggle_key_visibility)
-        h_key.addWidget(self.txt_key)
-        h_key.addWidget(self.btn_toggle_key)
-        form_layout.addLayout(h_key, 2, 1)
-
-        # Model Name
-        form_layout.addWidget(QLabel("Model Name:"), 3, 0)
-        self.txt_model = QLineEdit(Config.LLM_MODEL)
-        self.txt_model.setFixedHeight(32)
-        self.txt_model.setPlaceholderText("e.g. gpt-4o-mini, gemma-4-26B-A4B-it")
-        form_layout.addWidget(self.txt_model, 3, 1)
-
-        layout.addLayout(form_layout)
-
-        # Status feedback label
-        self.lbl_status = QLabel("")
-        self.lbl_status.setFixedHeight(24)
-        self.lbl_status.setStyleSheet("font-size: 11px; font-weight: 500;")
-        self.lbl_status.setWordWrap(True)
-        layout.addWidget(self.lbl_status)
-
-        # Buttons layout
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
-
-        self.btn_test = QPushButton("🔌 Test Connection")
-        self.btn_test.setFixedHeight(34)
-        self.btn_test.setStyleSheet("background-color: #FFFFFF; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px; font-weight: 500; padding: 0 14px;")
-        self.btn_test.clicked.connect(self.action_test_connection)
-
-        self.btn_save = QPushButton("💾 Save Settings")
-        self.btn_save.setFixedHeight(34)
-        self.btn_save.setStyleSheet("background-color: #2563EB; color: #FFFFFF; font-weight: bold; border-radius: 6px; padding: 0 18px;")
-        self.btn_save.clicked.connect(self.action_save)
-
-        self.btn_cancel = QPushButton("Cancel")
-        self.btn_cancel.setFixedHeight(34)
-        self.btn_cancel.setStyleSheet("background-color: #FFFFFF; color: #64748B; border: 1px solid #CBD5E1; border-radius: 6px; padding: 0 14px;")
-        self.btn_cancel.clicked.connect(self.reject)
-
-        btn_layout.addWidget(self.btn_test)
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.btn_cancel)
-        btn_layout.addWidget(self.btn_save)
-
-        layout.addLayout(btn_layout)
-
-    @Slot(str)
-    def on_preset_changed(self, preset_name: str):
-        preset = self.PRESETS.get(preset_name)
-        if preset:
-            self.txt_url.setText(preset["base_url"])
-            if preset["api_key"]:
-                self.txt_key.setText(preset["api_key"])
-            self.txt_model.setText(preset["model"])
-            self.lbl_status.setText("")
-
-    @Slot()
-    def toggle_key_visibility(self):
-        if self.txt_key.echoMode() == QLineEdit.Password:
-            self.txt_key.setEchoMode(QLineEdit.Normal)
-            self.btn_toggle_key.setText("🔒")
-        else:
-            self.txt_key.setEchoMode(QLineEdit.Password)
-            self.btn_toggle_key.setText("👁️")
-
-    @Slot()
-    def action_test_connection(self):
-        url = self.txt_url.text().strip()
-        key = self.txt_key.text().strip()
-        model = self.txt_model.text().strip()
-        self.lbl_status.setStyleSheet("color: #2563EB; font-size: 11px;")
-        self.lbl_status.setText("⏳ Testing connection, please wait...")
-        QApplication.processEvents()
-
-        ok, msg = test_llm_connection(url, key, model)
-        if ok:
-            self.lbl_status.setStyleSheet("color: #16A34A; font-size: 11px; font-weight: bold;")
-            self.lbl_status.setText(msg)
-        else:
-            self.lbl_status.setStyleSheet("color: #DC2626; font-size: 11px;")
-            self.lbl_status.setText(msg)
-
-    @Slot()
-    def action_save(self):
-        url = self.txt_url.text().strip()
-        key = self.txt_key.text().strip()
-        model = self.txt_model.text().strip()
-
-        if not url:
-            QMessageBox.warning(self, "Invalid Input", "Base URL cannot be empty!")
-            return
-        if not model:
-            QMessageBox.warning(self, "Invalid Input", "Model Name cannot be empty!")
-            return
-
-        Config.save_llm_config(url, key, model)
-        self.accept()
 
 
 class MainWindow(QMainWindow):
@@ -385,6 +162,40 @@ class MainWindow(QMainWindow):
         self.sub_bg_color = "#FFFFFF"
         self.sub_outline_width = 6
         self.sub_shadow_width = 0
+
+        # Presets cấu hình LLM Provider
+        self.LLM_PRESETS = {
+            "Custom Settings": {
+                "base_url": Config.LLM_BASE_URL,
+                "api_key": Config.LLM_API_KEY,
+                "model": Config.LLM_MODEL
+            },
+            "VNPT-SI AI Gateway": {
+                "base_url": "https://llm.vnptsi.vn/v1",
+                "api_key": Config.LLM_API_KEY if "vnptsi" in Config.LLM_BASE_URL else "no-key-required",
+                "model": "google/gemma-4-26B-A4B-it"
+            },
+            "Ollama (Local - http://localhost:11434/v1)": {
+                "base_url": "http://localhost:11434/v1",
+                "api_key": "ollama",
+                "model": "gemma3:4b"
+            },
+            "OpenAI Official (https://api.openai.com/v1)": {
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "",
+                "model": "gpt-4o-mini"
+            },
+            "Groq Cloud (https://api.groq.com/openai/v1)": {
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_key": "",
+                "model": "llama-3.3-70b-versatile"
+            },
+            "DeepSeek API (https://api.deepseek.com/v1)": {
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key": "",
+                "model": "deepseek-chat"
+            }
+        }
 
         self.init_ui()
         self.apply_styles()
@@ -796,36 +607,129 @@ class MainWindow(QMainWindow):
 
         # 7. MODEL MANAGER TAB
         layout_models = QVBoxLayout(self.tab_models)
-        layout_models.setContentsMargins(30, 30, 30, 30)
+        layout_models.setContentsMargins(40, 30, 40, 30)
         layout_models.setSpacing(16)
+        layout_models.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
 
-        grp_model_info = QGroupBox("⚙️ LLM & AI Service Settings")
-        grp_model_info.setStyleSheet("padding: 20px;")
-        layout_info = QVBoxLayout(grp_model_info)
-        layout_info.setSpacing(12)
+        grp_model_cfg = QGroupBox("⚙️ LLM && AI Service Settings")
+        grp_model_cfg.setMaximumWidth(760)
+        grp_model_cfg.setStyleSheet("""
+            QGroupBox {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                margin-top: 14px;
+                padding-top: 20px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 20px;
+                padding: 0 8px;
+                color: #0F172A;
+                font-weight: bold;
+                font-size: 13px;
+            }
+        """)
+        layout_cfg = QVBoxLayout(grp_model_cfg)
+        layout_cfg.setContentsMargins(28, 22, 28, 22)
+        layout_cfg.setSpacing(16)
 
         info_title = QLabel("<b>Configure AI Translation Services</b>")
-        info_title.setStyleSheet("font-size: 14px; color: #0F172A;")
-        layout_info.addWidget(info_title)
+        info_title.setStyleSheet("font-size: 15px; color: #0F172A;")
+        layout_cfg.addWidget(info_title)
 
         info_desc = QLabel(
-            "AutoDub Studio supports any OpenAI-compatible endpoint, including local Ollama instances, "
-            "VNPT-SI AI Gateway, Groq Cloud, DeepSeek, and OpenAI official APIs.<br><br>"
-            "Settings are saved permanently to your <code>.env</code> file so you never need to edit code."
+            "AutoDub Studio supports any OpenAI-compatible LLM endpoint (Ollama local, VNPT-SI, Groq, DeepSeek, OpenAI).<br>"
+            "Select a preset or customize parameters. Settings are saved permanently to your <code>.env</code> file."
         )
         info_desc.setWordWrap(True)
-        info_desc.setStyleSheet("font-size: 12px; color: #475569;")
-        layout_info.addWidget(info_desc)
+        info_desc.setStyleSheet("font-size: 12px; color: #475569; line-height: 1.4;")
+        layout_cfg.addWidget(info_desc)
 
-        btn_open_llm_cfg = QPushButton("⚙️ Open LLM Configuration Dialog...")
-        btn_open_llm_cfg.setFixedHeight(38)
-        btn_open_llm_cfg.setFixedWidth(280)
-        btn_open_llm_cfg.setStyleSheet("background-color: #2563EB; color: #FFFFFF; font-weight: bold; font-size: 12px; border-radius: 6px;")
-        btn_open_llm_cfg.clicked.connect(self.action_change_model)
-        layout_info.addWidget(btn_open_llm_cfg)
-        layout_info.addStretch()
+        # Form Grid
+        form_grid = QGridLayout()
+        form_grid.setVerticalSpacing(14)
+        form_grid.setHorizontalSpacing(16)
+        form_grid.setColumnStretch(0, 0)
+        form_grid.setColumnStretch(1, 1)
+        form_grid.setColumnMinimumWidth(0, 130)
 
-        layout_models.addWidget(grp_model_info)
+        # Row 0: Provider Preset
+        lbl_preset = QLabel("Provider Preset:")
+        lbl_preset.setStyleSheet("font-weight: 500; font-size: 12px;")
+        form_grid.addWidget(lbl_preset, 0, 0)
+        self.cbo_tab_preset = QComboBox()
+        self.cbo_tab_preset.setFixedHeight(34)
+        self.cbo_tab_preset.addItems(list(self.LLM_PRESETS.keys()))
+        self.cbo_tab_preset.currentTextChanged.connect(self.on_tab_preset_changed)
+        form_grid.addWidget(self.cbo_tab_preset, 0, 1)
+
+        # Row 1: Base URL
+        lbl_url = QLabel("Base URL:")
+        lbl_url.setStyleSheet("font-weight: 500; font-size: 12px;")
+        form_grid.addWidget(lbl_url, 1, 0)
+        self.txt_tab_url = QLineEdit(Config.LLM_BASE_URL)
+        self.txt_tab_url.setFixedHeight(34)
+        self.txt_tab_url.setPlaceholderText("https://api.openai.com/v1")
+        form_grid.addWidget(self.txt_tab_url, 1, 1)
+
+        # Row 2: API Key with Show/Hide toggle
+        lbl_key = QLabel("API Key:")
+        lbl_key.setStyleSheet("font-weight: 500; font-size: 12px;")
+        form_grid.addWidget(lbl_key, 2, 0)
+        h_tab_key = QHBoxLayout()
+        h_tab_key.setSpacing(6)
+        self.txt_tab_key = QLineEdit(Config.LLM_API_KEY)
+        self.txt_tab_key.setFixedHeight(34)
+        self.txt_tab_key.setEchoMode(QLineEdit.Password)
+        self.txt_tab_key.setPlaceholderText("sk-... or no-key-required")
+        self.btn_toggle_tab_key = QPushButton("👁️")
+        self.btn_toggle_tab_key.setFixedSize(38, 34)
+        self.btn_toggle_tab_key.setToolTip("Show / Hide API Key")
+        self.btn_toggle_tab_key.setStyleSheet("background-color: #F8FAFC; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px;")
+        self.btn_toggle_tab_key.clicked.connect(self.toggle_tab_key_visibility)
+        h_tab_key.addWidget(self.txt_tab_key)
+        h_tab_key.addWidget(self.btn_toggle_tab_key)
+        form_grid.addLayout(h_tab_key, 2, 1)
+
+        # Row 3: Model Name
+        lbl_model = QLabel("Model Name:")
+        lbl_model.setStyleSheet("font-weight: 500; font-size: 12px;")
+        form_grid.addWidget(lbl_model, 3, 0)
+        self.txt_tab_model = QLineEdit(Config.LLM_MODEL)
+        self.txt_tab_model.setFixedHeight(34)
+        self.txt_tab_model.setPlaceholderText("e.g. gpt-4o-mini, gemma-4-26B-A4B-it")
+        form_grid.addWidget(self.txt_tab_model, 3, 1)
+
+        layout_cfg.addLayout(form_grid)
+
+        # Status feedback label
+        self.lbl_tab_status = QLabel("")
+        self.lbl_tab_status.setFixedHeight(24)
+        self.lbl_tab_status.setStyleSheet("font-size: 12px; font-weight: 500;")
+        self.lbl_tab_status.setWordWrap(True)
+        layout_cfg.addWidget(self.lbl_tab_status)
+
+        # Buttons bar
+        btn_bar = QHBoxLayout()
+        btn_bar.setSpacing(12)
+
+        self.btn_tab_test = QPushButton("🔌 Test Connection")
+        self.btn_tab_test.setFixedHeight(36)
+        self.btn_tab_test.setStyleSheet("background-color: #FFFFFF; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px; font-weight: 600; padding: 0 18px;")
+        self.btn_tab_test.clicked.connect(self.action_test_tab_connection)
+
+        self.btn_tab_save = QPushButton("💾 Save Settings")
+        self.btn_tab_save.setFixedHeight(36)
+        self.btn_tab_save.setStyleSheet("background-color: #2563EB; color: #FFFFFF; font-weight: bold; border-radius: 6px; padding: 0 24px;")
+        self.btn_tab_save.clicked.connect(self.action_save_tab_llm_config)
+
+        btn_bar.addWidget(self.btn_tab_test)
+        btn_bar.addStretch()
+        btn_bar.addWidget(self.btn_tab_save)
+        layout_cfg.addLayout(btn_bar)
+
+        layout_models.addWidget(grp_model_cfg)
         layout_models.addStretch()
 
     def apply_styles(self):
@@ -1096,11 +1000,73 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def action_change_model(self):
-        """Open modal dialog to configure LLM settings."""
-        dialog = LLMConfigDialog(self)
-        if dialog.exec():
-            self.txt_model.setText(Config.LLM_MODEL)
-            self.append_log(f"• LLM Configuration updated: Model={Config.LLM_MODEL} | Base URL={Config.LLM_BASE_URL}")
+        """Switch directly to Model Manager tab."""
+        self.tabs.setCurrentIndex(2)
+
+    @Slot(str)
+    def on_tab_preset_changed(self, preset_name: str):
+        """Auto-populate fields when provider preset changes in Model Manager tab."""
+        preset = self.LLM_PRESETS.get(preset_name)
+        if preset:
+            self.txt_tab_url.setText(preset["base_url"])
+            if preset["api_key"]:
+                self.txt_tab_key.setText(preset["api_key"])
+            self.txt_tab_model.setText(preset["model"])
+            self.lbl_tab_status.setText("")
+
+    @Slot()
+    def toggle_tab_key_visibility(self):
+        """Toggle password masking for API Key in Model Manager tab."""
+        if self.txt_tab_key.echoMode() == QLineEdit.Password:
+            self.txt_tab_key.setEchoMode(QLineEdit.Normal)
+            self.btn_toggle_tab_key.setText("🔒")
+        else:
+            self.txt_tab_key.setEchoMode(QLineEdit.Password)
+            self.btn_toggle_tab_key.setText("👁️")
+
+    @Slot()
+    def action_test_tab_connection(self):
+        """Test connection ping to the entered LLM endpoint."""
+        url = self.txt_tab_url.text().strip()
+        key = self.txt_tab_key.text().strip()
+        model = self.txt_tab_model.text().strip()
+        self.lbl_tab_status.setStyleSheet("color: #2563EB; font-size: 12px; font-weight: 500;")
+        self.lbl_tab_status.setText("⏳ Testing connection, please wait...")
+        QApplication.processEvents()
+
+        ok, msg = test_llm_connection(url, key, model)
+        if ok:
+            self.lbl_tab_status.setStyleSheet("color: #16A34A; font-size: 12px; font-weight: bold;")
+            self.lbl_tab_status.setText(msg)
+        else:
+            self.lbl_tab_status.setStyleSheet("color: #DC2626; font-size: 12px; font-weight: 500;")
+            self.lbl_tab_status.setText(msg)
+
+    @Slot()
+    def action_save_tab_llm_config(self):
+        """Validate, save LLM configuration to .env, and synchronize UI."""
+        url = self.txt_tab_url.text().strip()
+        key = self.txt_tab_key.text().strip()
+        model = self.txt_tab_model.text().strip()
+
+        if not url:
+            QMessageBox.warning(self, "Invalid Input", "Base URL cannot be empty!")
+            return
+        if not model:
+            QMessageBox.warning(self, "Invalid Input", "Model Name cannot be empty!")
+            return
+
+        Config.save_llm_config(url, key, model)
+        self.txt_model.setText(Config.LLM_MODEL)
+        self.lbl_tab_status.setStyleSheet("color: #16A34A; font-size: 12px; font-weight: bold;")
+        self.lbl_tab_status.setText("✓ Configuration saved permanently to .env!")
+        self.append_log(f"• LLM Configuration updated: Model={Config.LLM_MODEL} | Base URL={Config.LLM_BASE_URL}")
+
+        QMessageBox.information(
+            self,
+            "Settings Saved",
+            f"LLM settings saved successfully!\n\n• Model: {Config.LLM_MODEL}\n• Base URL: {Config.LLM_BASE_URL}"
+        )
 
     @Slot()
     def action_open_output_folder(self):
