@@ -51,13 +51,41 @@ LLM_API_KEY=your_api_key_here
 ```
 
 ### 3. Khởi chạy ứng dụng
-Chạy giao diện Desktop:
+
+**Cách 1: Khởi chạy 1-click trên Windows (Tiện nhất)**
+Click đúp chuột vào tệp:
+```text
+run_gui.bat
+```
+
+**Cách 2: Chạy lệnh Python**
 ```bash
 python gui.py
 ```
-Hoặc chạy dòng lệnh CLI:
+
+**Cách 3: Chạy bằng dòng lệnh CLI**
 ```bash
-python pipeline.py --url "https://www.tiktok.com/@user/video/123456789" --voice "vi-VN-NamMinhNeural"
+python pipeline.py --source "https://www.tiktok.com/@user/video/..." --voice "vi-VN-NamMinhNeural"
+```
+
+---
+
+## 📦 Đóng Gói Thành Ứng Dụng Desktop (.exe)
+
+Để đóng gói toàn bộ ứng dụng thành tệp thực thi Windows độc lập (kèm sẵn FFmpeg):
+```bash
+python build_exe.py
+```
+Sau khi chạy xong, ứng dụng hoàn chỉnh nằm tại:
+`dist/AutoDubStudio/AutoDubStudio.exe` (chạy trực tiếp không cần cài Python).
+
+---
+
+## 🧪 Kiểm Thử Toàn Trình (Testing)
+
+Chạy toàn bộ 6 bài kiểm thử đơn vị từ Phase 2 đến Phase 7:
+```bash
+python tests/run_all_tests.py
 ```
 
 ---
