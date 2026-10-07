@@ -15,6 +15,7 @@ if sys.platform == "win32":
         pass
 
 root_dir = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(root_dir))
 gui_file = root_dir / "gui.py"
 
 
@@ -30,7 +31,34 @@ def test_gui_syntax_and_structure():
     print("✓ test_gui_syntax_and_structure: PASSED (Cú pháp hợp lệ, có DubbingWorker và MainWindow)")
 
 
+def test_worker_signals_and_button_recovery():
+    """Kiểm tra DubbingWorker luôn phát sig_finished và MainWindow có update_control_buttons."""
+    from PySide6.QtWidgets import QApplication
+    from gui import DubbingWorker, MainWindow
+    
+    app = QApplication.instance() or QApplication(sys.argv)
+    
+    # Kiểm tra phương thức update_control_buttons có tồn tại trên MainWindow
+    assert hasattr(MainWindow, "update_control_buttons"), "MainWindow thiếu phương thức update_control_buttons"
+    
+    # Kiểm tra worker với task giả định lỗi
+    fake_tasks = [{"row": 0, "source": "non_existent_fake_video.mp4"}]
+    worker = DubbingWorker(fake_tasks, {})
+    
+    finished_called = []
+    def on_finished(success, total):
+        finished_called.append((success, total))
+        
+    worker.sig_finished.connect(on_finished)
+    worker.run()  # Chạy trực tiếp phương thức run để kiểm tra khối try...finally
+    
+    assert len(finished_called) == 1, "sig_finished không được phát khi worker kết thúc hoặc gặp lỗi"
+    assert finished_called[0] == (0, 1), f"Kết quả trả về không đúng: {finished_called[0]}"
+    print("✓ test_worker_signals_and_button_recovery: PASSED (sig_finished luôn phát dù video bị lỗi)")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 7 ===")
     test_gui_syntax_and_structure()
+    test_worker_signals_and_button_recovery()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 7 ĐÃ VƯỢT QUA ===")

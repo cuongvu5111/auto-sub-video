@@ -56,49 +56,52 @@ class DubbingWorker(QThread):
     def run(self):
         total = len(self.tasks)
         success_count = 0
+        try:
+            self.sig_log.emit(f"=== BATCH PROCESSING STARTED ({total} VIDEOS) ===")
 
-        self.sig_log.emit(f"=== BATCH PROCESSING STARTED ({total} VIDEOS) ===")
+            for idx, task in enumerate(self.tasks):
+                if self._is_cancelled:
+                    self.sig_log.emit("⚠️ Cancel signal received from user.")
+                    break
 
-        for idx, task in enumerate(self.tasks):
-            if self._is_cancelled:
-                self.sig_log.emit("⚠️ Cancel signal received from user.")
-                break
+                row = task["row"]
+                source = task["source"]
+                self.sig_item_status.emit(row, "⏳ Processing...", "#E67E22")
+                self.sig_log.emit(f"\n[Video {idx + 1}/{total}]: {source}")
 
-            row = task["row"]
-            source = task["source"]
-            self.sig_item_status.emit(row, "⏳ Processing...", "#E67E22")
-            self.sig_log.emit(f"\n[Video {idx + 1}/{total}]: {source}")
+                def progress_hook(msg: str, percent: float):
+                    overall_percent = ((idx + (percent / 100.0)) / total) * 100.0
+                    self.sig_progress.emit(overall_percent)
+                    self.sig_log.emit(f"  » {msg}")
 
-            def progress_hook(msg: str, percent: float):
-                overall_percent = ((idx + (percent / 100.0)) / total) * 100.0
-                self.sig_progress.emit(overall_percent)
-                self.sig_log.emit(f"  » {msg}")
+                try:
+                    final_video = run_pipeline(
+                        source=source,
+                        source_lang=self.options.get("source_lang", "auto"),
+                        voice=self.options.get("voice"),
+                        ducking_volume=self.options.get("ducking_volume", 0.10),
+                        burn_subtitles=self.options.get("burn_subtitles", True),
+                        genre=self.options.get("genre", "Daily Life / Social Media"),
+                        custom_terms=self.options.get("custom_terms", ""),
+                        subtitle_options=self.options.get("subtitle_options"),
+                        watermark_options=self.options.get("watermark_options"),
+                        encoder=self.options.get("encoder"),
+                        output_dir=self.options.get("output_dir"),
+                        progress_callback=progress_hook
+                    )
+                    success_count += 1
+                    self.sig_item_status.emit(row, f"✓ Done - {final_video.name}", "#27AE60")
+                    self.sig_log.emit(f"✓ COMPLETED: {final_video.name}")
 
-            try:
-                final_video = run_pipeline(
-                    source=source,
-                    source_lang=self.options.get("source_lang", "auto"),
-                    voice=self.options.get("voice"),
-                    ducking_volume=self.options.get("ducking_volume", 0.10),
-                    burn_subtitles=self.options.get("burn_subtitles", True),
-                    genre=self.options.get("genre", "Daily Life / Social Media"),
-                    custom_terms=self.options.get("custom_terms", ""),
-                    subtitle_options=self.options.get("subtitle_options"),
-                    watermark_options=self.options.get("watermark_options"),
-                    encoder=self.options.get("encoder"),
-                    output_dir=self.options.get("output_dir"),
-                    progress_callback=progress_hook
-                )
-                success_count += 1
-                self.sig_item_status.emit(row, f"✓ Done - {final_video.name}", "#27AE60")
-                self.sig_log.emit(f"✓ COMPLETED: {final_video.name}")
+                except Exception as e:
+                    self.sig_item_status.emit(row, f"❌ Failed: {str(e)[:30]}", "#E74C3C")
+                    self.sig_log.emit(f"❌ ERROR PROCESSING: {str(e)}")
 
-            except Exception as e:
-                self.sig_item_status.emit(row, f"❌ Failed: {str(e)[:30]}", "#E74C3C")
-                self.sig_log.emit(f"❌ ERROR PROCESSING: {str(e)}")
-
-        self.sig_progress.emit(100.0)
-        self.sig_log.emit(f"\n=== FINISHED: {success_count}/{total} VIDEOS SUCCESSFUL ===")
+            self.sig_progress.emit(100.0)
+            self.sig_log.emit(f"\n=== FINISHED: {success_count}/{total} VIDEOS SUCCESSFUL ===")
+        finally:
+            # Phát tín hiệu hoàn tất để MainWindow phục hồi trạng thái nút bấm
+            self.sig_finished.emit(success_count, total)
 
 
 
@@ -1355,6 +1358,12 @@ class MainWindow(QMainWindow):
 
     # --- ACTIONS / SLOTS ---
 
+    def update_control_buttons(self):
+        """Đồng bộ và phục hồi trạng thái các nút Start và Stop theo tiến trình."""
+        is_running = self.worker is not None and self.worker.isRunning()
+        self.btn_stop.setEnabled(is_running)
+        self.btn_run.setEnabled(not is_running and self.table_queue.rowCount() > 0)
+
     @Slot()
     def action_paste_links(self):
         """Open dialog allowing user to paste multiple video links."""
@@ -1374,6 +1383,7 @@ class MainWindow(QMainWindow):
                 item_status.setForeground(QColor("#7F8C8D"))
                 self.table_queue.setItem(row, 2, item_status)
             self.lbl_stats.setText(f"{self.table_queue.rowCount()} video(s) in queue")
+            self.update_control_buttons()
 
     @Slot()
     def action_add_files(self):
@@ -1394,6 +1404,7 @@ class MainWindow(QMainWindow):
                 item_status.setForeground(QColor("#7F8C8D"))
                 self.table_queue.setItem(row, 2, item_status)
             self.lbl_stats.setText(f"{self.table_queue.rowCount()} video(s) in queue")
+            self.update_control_buttons()
 
     @Slot()
     def action_remove_selected_rows(self):
@@ -1402,6 +1413,7 @@ class MainWindow(QMainWindow):
         for row in selected_rows:
             self.table_queue.removeRow(row)
         self.lbl_stats.setText(f"{self.table_queue.rowCount()} video(s) in queue")
+        self.update_control_buttons()
 
     @Slot()
     def action_browse_output_dir(self):
@@ -1607,8 +1619,18 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Notice", "Queue is empty! Please add video files or paste video links first.")
             return
 
-        tasks = []
+        # Lọc các video cần xử lý: ưu tiên các video chưa xong (Queued hoặc Failed)
+        pending_rows = []
         for row in range(count):
+            status_item = self.table_queue.item(row, 2)
+            status_text = status_item.text() if status_item else ""
+            if not status_text.startswith("✓ Done"):
+                pending_rows.append(row)
+
+        target_rows = pending_rows if pending_rows else list(range(count))
+
+        tasks = []
+        for row in target_rows:
             source = self.table_queue.item(row, 0).text().strip()
             tasks.append({"row": row, "source": source})
 
@@ -1656,7 +1678,7 @@ class MainWindow(QMainWindow):
         self.btn_run.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.progress_bar.setValue(0)
-        self.lbl_stats.setText(f"Processing 0/{count} video(s)...")
+        self.lbl_stats.setText(f"Processing 0/{len(tasks)} video(s)...")
 
         # Launch Worker Thread
         self.worker = DubbingWorker(tasks, options)
@@ -1664,6 +1686,7 @@ class MainWindow(QMainWindow):
         self.worker.sig_progress.connect(self.update_progress)
         self.worker.sig_item_status.connect(self.update_item_status)
         self.worker.sig_finished.connect(self.on_worker_finished)
+        self.worker.finished.connect(self.on_worker_thread_terminated)
         self.worker.start()
 
     @Slot()
@@ -1673,6 +1696,8 @@ class MainWindow(QMainWindow):
             self.worker.cancel()
             self.btn_stop.setEnabled(False)
             self.lbl_stats.setText("Cancelling process...")
+        else:
+            self.update_control_buttons()
 
     @Slot(float)
     def update_progress(self, percent: float):
@@ -1684,10 +1709,14 @@ class MainWindow(QMainWindow):
         item.setForeground(QColor(hex_color))
         self.table_queue.setItem(row, 2, item)
 
+    @Slot()
+    def on_worker_thread_terminated(self):
+        """Dự phòng an toàn: đảm bảo nút Start/Stop được phục hồi khi luồng worker kết thúc."""
+        self.update_control_buttons()
+
     @Slot(int, int)
     def on_worker_finished(self, success_count: int, total_count: int):
-        self.btn_run.setEnabled(True)
-        self.btn_stop.setEnabled(False)
+        self.update_control_buttons()
         self.lbl_stats.setText(f"Completed: {success_count}/{total_count} video(s)")
 
         msg_box = QMessageBox(self)

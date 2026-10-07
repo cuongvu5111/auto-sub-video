@@ -7,6 +7,7 @@ yt-dlp>=2024.8.6
 
 # Nhận diện giọng nói siêu nhanh trên CPU (CTranslate2)
 faster-whisper>=1.0.3
+av<19
 
 # Giọng đọc AI tự nhiên chất lượng cao từ Microsoft Edge (miễn phí)
 edge-tts>=6.1.12

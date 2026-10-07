@@ -23,10 +23,11 @@ def find_ffmpeg() -> str:
     2. ffmpeg có sẵn trong biến môi trường PATH hệ thống
     3. imageio-ffmpeg nếu có cài đặt
     """
-    # 1. Kiểm tra thư mục bin nội bộ của dự án
-    local_ffmpeg = Config.BASE_DIR / "bin" / "ffmpeg.exe"
-    if local_ffmpeg.exists():
-        return str(local_ffmpeg)
+    # 1. Kiểm tra thư mục bin nội bộ của dự án (hỗ trợ cả exe đóng gói và thư mục dự án)
+    for candidate_dir in [Config.BIN_DIR, getattr(Config, "INTERNAL_DIR", Config.BASE_DIR) / "bin"]:
+        local_ffmpeg = candidate_dir / "ffmpeg.exe"
+        if local_ffmpeg.exists():
+            return str(local_ffmpeg)
 
     # 2. Kiểm tra trong biến môi trường PATH
     system_ffmpeg = shutil.which("ffmpeg")

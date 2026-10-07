@@ -1,91 +1,125 @@
-# AutoSub Dubbing Studio - AI Video Dubbing & Subtitles
+# AutoDub Studio — AI Video Dubbing & Subtitles
 
-An all-in-one automated desktop suite for downloading short videos from TikTok, Douyin, and other platforms, performing precise Speech-to-Text, contextual LLM translation, natural AI voice dubbing (via Microsoft Edge Neural TTS), audio tempo synchronization, smart background ducking, and video rendering with animated subtitles.
+> **v1.0.1** · Windows 10 / 11 (64-bit) · No GPU required · 100% Free & Open Source
+
+An all-in-one automated desktop suite for downloading short videos from TikTok, Douyin, and other platforms — performing precise Speech-to-Text, contextual LLM dialogue translation, natural AI voice dubbing, audio tempo synchronization, smart background ducking, and video rendering with animated TikTok-style subtitles.
 
 ---
 
 ## ✨ Key Features
 
-* 🚀 **Watermark-Free Video Downloads**: High-resolution video extraction from TikTok and Douyin powered by `yt-dlp`.
-* 🎙️ **High-Accuracy Speech-to-Text**: Powered by `faster-whisper` (CTranslate2) with INT8 quantization, optimized for fast CPU processing without a dedicated GPU.
-* 🧠 **Smart LLM Translation**: Leverages instruction-tuned models (Gemma, GPT-4o-mini, Ollama) with syllable-count constraints tailored for fast-paced video dubbing.
-* 🗣️ **Natural AI Voice Dubbing**: Free, unlimited neural voice synthesis via `edge-tts` with expressive Vietnamese and multi-language voices.
-* ⏱️ **Audio Speed Synchronization**: Dynamic tempo adjustments (`0.85x` - `1.30x`) using FFmpeg's `atempo` filter to match original video lip movements without pitch distortion.
-* 🎧 **Intelligent Audio Ducking**: Drops original background audio volume to 10% to preserve laughter, music, and ambient noise while elevating the dubbed voice track.
-* 🖥️ **Native Desktop Studio**: Built with `PySide6` (Qt), featuring a batch processing queue, two-column settings grid, progress tracking, and a real-time console log viewer.
+* 📥 **Watermark-Free Video Downloads** — High-resolution extraction from TikTok and Douyin powered by `yt-dlp`.
+* 🎙️ **High-Accuracy Speech-to-Text** — Powered by `faster-whisper` (CTranslate2) with INT8 quantization, CPU-optimized with automatic NVIDIA CUDA detection.
+* 🧠 **Smart LLM Translation** — Contextual dialogue translation using any OpenAI-compatible endpoint (Ollama, Groq, VNPT LLM Gateway, OpenAI).
+* 🗣️ **Natural AI Voice Dubbing** — Free, unlimited Microsoft Edge Neural TTS (`vi-VN-NamMinhNeural` / `vi-VN-HoaiMyNeural`).
+* ⏱️ **Audio Speed Synchronization** — Dynamic tempo adjustment (`0.85x` – `1.30x`) via FFmpeg `atempo` without pitch distortion.
+* 🎧 **Intelligent Audio Ducking** — Preserves background music and ambient audio at 10% while elevating the dubbed voice track to 100%.
+* ✨ **TikTok-Style Animated Subtitles** — Fully customizable `.ass` subtitle rendering with font, outline, shadow, padding, and position controls.
+* 🖥️ **Native Desktop Studio** — Built with `PySide6` featuring a batch processing queue, two-column settings grid, real-time console log, and smooth progress bar.
 
 ---
 
 ## 🛠️ System Requirements
 
-* **Operating System**: Windows 10 or Windows 11 (64-bit)
-* **Python**: Version 3.10 or higher
-* **FFmpeg**: Pre-bundled portable binary included in `bin/ffmpeg.exe` (no separate system installation required).
+| Requirement | Minimum |
+| :--- | :--- |
+| **OS** | Windows 10 / Windows 11 (64-bit) |
+| **Python** | 3.10 or higher |
+| **FFmpeg** | Pre-bundled in `bin/ffmpeg.exe` — no separate install needed |
+| **GPU** | Optional — NVIDIA CUDA auto-detected for faster transcription |
 
 ---
 
 ## 🚀 Installation & Quick Start
 
-### 1. Install Dependencies
+### Option A — Standalone Executable (No Python required)
+
+Download the latest release from [**GitHub Releases**](../../releases) and extract:
+```text
+AutoDubStudio-v1.0.1-windows-x64.zip
+```
+Double-click **`AutoDubStudio.exe`** to launch. Everything is bundled.
+
+---
+
+### Option B — Run from Source
+
+**1. Clone the repository**
 ```bash
+git clone https://github.com/your-username/auto-sub-video.git
+cd auto-sub-video
+```
+
+**2. Create a virtual environment and install dependencies**
+```bash
+py -3.10 -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
-Create your `.env` configuration file from the template:
+> ⚠️ `requirements.txt` pins `av<19` to maintain compatibility with `faster-whisper`. Do not upgrade `av` to `19.x` or above.
+
+**3. Configure your environment**
 ```bash
-cp .env.example .env
+copy .env.example .env
 ```
-Edit `.env` to configure your preferred LLM provider (Ollama local, OpenAI, Groq, or custom proxy):
+Edit `.env` with your LLM provider details:
 ```env
 LLM_BASE_URL=http://localhost:11434/v1
 LLM_MODEL=gemma3:4b
 LLM_API_KEY=your_api_key_here
 ```
 
-### 3. Launch Application
+**4. Launch the application**
 
-**Option A: 1-Click Windows Launcher (Recommended)**
-Double-click the launcher script:
-```text
+```bash
+# Option A: 1-Click Windows Launcher
 run_gui.bat
-```
 
-**Option B: Python Desktop GUI**
-```bash
+# Option B: Python GUI directly
 python gui.py
-```
 
-**Option C: Command Line Interface (CLI)**
-```bash
+# Option C: Command Line Interface
 python pipeline.py --source "https://www.tiktok.com/@user/video/..." --voice "vi-VN-NamMinhNeural"
 ```
 
 ---
 
-## 📦 Standalone Executable Packaging (.exe)
+## 📦 Build Standalone Executable
 
-Package the entire application into a standalone Windows executable (bundled with portable FFmpeg):
+Package the entire application into a portable Windows `.exe` (bundled with FFmpeg):
 ```bash
 python build_exe.py
 ```
-The compiled distribution will be created at:
-`dist/AutoDubStudio/AutoDubStudio.exe` (runs on any Windows PC without Python installed).
+Output:
+```text
+dist/AutoDubStudio/AutoDubStudio.exe         ← Run directly
+dist/AutoDubStudio-v1.0.1-windows-x64.zip   ← Upload to GitHub Releases
+```
 
 ---
 
-## 🧪 Comprehensive Test Suite
+## 🧪 Test Suite
 
-Run the full end-to-end automated test suite (Phases 2 through 7):
+Run the full automated test suite (Phases 2 through 7):
 ```bash
 python tests/run_all_tests.py
 ```
+Expected result: **6/6 tests passing**.
 
 ---
 
 ## 📂 Architecture & Documentation
 
-For in-depth architecture details and implementation roadmaps, consult:
-* [`PROJECT.md`](file:///d:/www/auto-sub-video/PROJECT.md): Full technical specifications, tech stack, and conventions.
-* [`AGENTS.md`](file:///d:/www/auto-sub-video/AGENTS.md): Development principles and coding agent guidelines.
-* [`docs/implementation_plan.md`](file:///d:/www/auto-sub-video/docs/implementation_plan.md): 8-Phase implementation roadmap and checklist.
+| Document | Description |
+| :--- | :--- |
+| [`PROJECT.md`](PROJECT.md) | Full technical specs, tech stack, and conventions |
+| [`AGENTS.md`](AGENTS.md) | AI coding agent development guidelines |
+| [`docs/RELEASE_NOTES_v1.0.1.md`](docs/RELEASE_NOTES_v1.0.1.md) | Changelog and release details for v1.0.1 |
+| [`docs/implementation_plan.md`](docs/implementation_plan.md) | 8-Phase implementation roadmap and checklist |
+
+---
+
+## 📄 License
+
+This project is open-source and free to use. Built with 100% free and open-source components.

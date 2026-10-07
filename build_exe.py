@@ -43,6 +43,7 @@ def build_application():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
+        "--clean",
         "--onedir",                  # Đóng gói ra thư mục phân phối (tối ưu tốc độ mở app)
         "--windowed",                # Ẩn cửa sổ terminal phụ
         "--name", "AutoDubStudio",   # Tên ứng dụng
@@ -52,16 +53,19 @@ def build_application():
         f"--add-data={ASSETS_DIR};assets" if ASSETS_DIR.exists() else "",
         # Đính kèm file mẫu cấu hình
         f"--add-data={ROOT_DIR / '.env.example'};.",
+        # Thu thập đầy đủ dữ liệu & DLL của faster-whisper và ctranslate2
+        "--collect-all=faster_whisper",
+        "--collect-all=ctranslate2",
+        "--collect-all=edge_tts",
+        "--copy-metadata=tqdm",
+        "--copy-metadata=av",
         # Khai báo các module ẩn
         "--hidden-import=PySide6",
-        "--hidden-import=faster_whisper",
-        "--hidden-import=edge_tts",
         "--hidden-import=pydub",
         "--hidden-import=openai",
         "--hidden-import=dotenv",
         "--hidden-import=yt_dlp",
         "--hidden-import=av",
-        "--hidden-import=ctranslate2",
         str(ENTRY_POINT)
     ]
 
@@ -74,7 +78,37 @@ def build_application():
     if result.returncode == 0:
         dist_path = ROOT_DIR / "dist" / "AutoDubStudio"
         exe_path = dist_path / "AutoDubStudio.exe"
-        zip_archive_base = ROOT_DIR / "dist" / "AutoDubStudio-v1.0.0-windows-x64"
+        zip_archive_base = ROOT_DIR / "dist" / "AutoDubStudio-v1.0.1-windows-x64"
+
+        # Đảm bảo các tệp phụ trợ nằm ngay cạnh file .exe để tiện sử dụng
+        if BIN_FFMPEG.exists():
+            target_bin = dist_path / "bin"
+            target_bin.mkdir(exist_ok=True)
+            shutil.copy2(BIN_FFMPEG, target_bin / "ffmpeg.exe")
+
+        if ASSETS_DIR.exists():
+            target_assets = dist_path / "assets"
+            if not target_assets.exists():
+                shutil.copytree(ASSETS_DIR, target_assets)
+
+        env_example = ROOT_DIR / ".env.example"
+        if env_example.exists():
+            shutil.copy2(env_example, dist_path / ".env.example")
+
+        # Tạo file hướng dẫn sử dụng nhanh
+        readme_dist = dist_path / "HUONG_DAN_SU_DUNG.txt"
+        readme_dist.write_text(
+            "=== HUONG DAN SU DUNG AUTODUB STUDIO ===\n\n"
+            "1. Khoi dong ung dung:\n"
+            "   - Nhap dup chuot vao file 'AutoDubStudio.exe' de mo giao dien.\n\n"
+            "2. Cau hinh LLM:\n"
+            "   - Mo tab 'Settings' tren giao dien de nhap API Key va URL cua LLM (hoac sao chep .env.example thanh .env).\n\n"
+            "3. Long tieng video:\n"
+            "   - Nhan 'Add Video File(s)' hoac 'Paste Link(s)' de them video vao hang doi.\n"
+            "   - Chon giong doc (Nam Minh / Hoai My) va nhan '▶ Start'.\n"
+            "   - Video hoan thien se duoc luu trong thu muc 'output/'.\n",
+            encoding="utf-8"
+        )
 
         print(f"\n🎉 ĐÓNG GÓI THÀNH CÔNG!")
         print(f"Thư mục ứng dụng: {dist_path}")

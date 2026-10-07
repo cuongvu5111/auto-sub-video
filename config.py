@@ -3,20 +3,32 @@ Tệp quản lý cấu hình tập trung cho AutoSub Dubbing Studio.
 Đọc các thiết lập từ tệp .env và cung cấp các giá trị mặc định an toàn.
 """
 
+import sys
 import os
 from pathlib import Path
+
+# Xác định thư mục gốc ứng dụng (hỗ trợ cả môi trường dev lẫn exe đóng gói bằng PyInstaller)
+if getattr(sys, "frozen", False):
+    _app_dir = Path(sys.executable).resolve().parent
+    _internal_dir = Path(getattr(sys, "_MEIPASS", _app_dir))
+else:
+    _app_dir = Path(__file__).resolve().parent
+    _internal_dir = _app_dir
 
 # Vô hiệu hóa cảnh báo symlink của HuggingFace trên Windows
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("PYTHONUTF8", "1")
 
 # Tự động đưa thư mục bin vào PATH để FFmpeg portable luôn sẵn sàng
-_bin_dir = Path(__file__).resolve().parent / "bin"
-if _bin_dir.exists() and str(_bin_dir) not in os.environ.get("PATH", ""):
-    os.environ["PATH"] = str(_bin_dir) + os.pathsep + os.environ.get("PATH", "")
+for _b in [_app_dir / "bin", _internal_dir / "bin"]:
+    if _b.exists() and str(_b) not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = str(_b) + os.pathsep + os.environ.get("PATH", "")
 
 # Thử nạp biến môi trường từ tệp .env nếu thư viện python-dotenv đã được cài đặt
-env_path = Path(__file__).resolve().parent / ".env"
+env_path = _app_dir / ".env"
+if not env_path.exists():
+    env_path = _internal_dir / ".env"
+
 try:
     from dotenv import load_dotenv
     if env_path.exists():
@@ -40,8 +52,9 @@ except ImportError:
 class Config:
     """Lớp chứa toàn bộ thông số cấu hình của ứng dụng."""
 
-    # Đường dẫn thư mục gốc dự án
-    BASE_DIR: Path = Path(__file__).resolve().parent
+    # Đường dẫn thư mục gốc dự án (nơi người dùng lưu file exe hoặc mã nguồn)
+    BASE_DIR: Path = _app_dir
+    INTERNAL_DIR: Path = _internal_dir
 
     # Thư mục chứa các tệp thực thi portable (FFmpeg)
     BIN_DIR: Path = BASE_DIR / "bin"
