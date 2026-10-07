@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
         self.table_queue.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table_queue.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table_queue.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table_queue.setFixedHeight(135)
+        self.table_queue.setFixedHeight(115)
         self.table_queue.setSelectionBehavior(QTableWidget.SelectRows)
         tab_layout.addWidget(self.table_queue)
 
@@ -204,17 +204,17 @@ class MainWindow(QMainWindow):
 
         # 4. TWO-COLUMN CONFIGURATION GRID
         config_grid = QGridLayout()
-        config_grid.setSpacing(14)
+        config_grid.setSpacing(12)
 
         # --- LEFT COLUMN: Original Subtitles & Translation ---
         left_col = QVBoxLayout()
-        left_col.setSpacing(12)
+        left_col.setSpacing(10)
 
         # Group ② Original Subtitles
         grp_source = QGroupBox("② Original Subtitle")
         layout_source = QGridLayout(grp_source)
-        layout_source.setContentsMargins(16, 18, 16, 14)
-        layout_source.setVerticalSpacing(10)
+        layout_source.setContentsMargins(16, 16, 16, 14)
+        layout_source.setVerticalSpacing(8)
         layout_source.setHorizontalSpacing(14)
         layout_source.setColumnStretch(0, 0)
         layout_source.setColumnStretch(1, 1)
@@ -236,8 +236,8 @@ class MainWindow(QMainWindow):
         # Group ③ Translation
         grp_trans = QGroupBox("③ Translation")
         layout_trans = QGridLayout(grp_trans)
-        layout_trans.setContentsMargins(16, 18, 16, 14)
-        layout_trans.setVerticalSpacing(10)
+        layout_trans.setContentsMargins(16, 16, 16, 14)
+        layout_trans.setVerticalSpacing(8)
         layout_trans.setHorizontalSpacing(14)
         layout_trans.setColumnStretch(0, 0)
         layout_trans.setColumnStretch(1, 1)
@@ -285,13 +285,13 @@ class MainWindow(QMainWindow):
 
         # --- RIGHT COLUMN: Dubbing & Export ---
         right_col = QVBoxLayout()
-        right_col.setSpacing(12)
+        right_col.setSpacing(10)
 
         # Group ④ Dubbing
         grp_tts = QGroupBox("④ Dubbing")
         layout_tts = QGridLayout(grp_tts)
-        layout_tts.setContentsMargins(16, 18, 16, 14)
-        layout_tts.setVerticalSpacing(10)
+        layout_tts.setContentsMargins(16, 16, 16, 14)
+        layout_tts.setVerticalSpacing(8)
         layout_tts.setHorizontalSpacing(14)
         layout_tts.setColumnStretch(0, 0)
         layout_tts.setColumnStretch(1, 1)
@@ -304,8 +304,8 @@ class MainWindow(QMainWindow):
             self.cbo_voice.addItem(label, voice_key)
         layout_tts.addWidget(self.cbo_voice, 0, 1)
 
-        # Gom 2 input number (Ducking & Delay) vào 1 hàng ngang
-        layout_tts.addWidget(QLabel("Audio Tuning:"), 1, 0)
+        # Gom 2 input number (Ducking & Delay) vào 1 hàng ngang với nhãn gọn
+        layout_tts.addWidget(QLabel("Volume & Delay:"), 1, 0)
         h_tuning = QHBoxLayout()
         h_tuning.setSpacing(10)
 
@@ -316,7 +316,8 @@ class MainWindow(QMainWindow):
         self.spn_ducking.setSingleStep(0.02)
         self.spn_ducking.setValue(Config.DEFAULT_DUCKING_VOLUME)
 
-        lbl_delay = QLabel("Delay (s):")
+        lbl_delay = QLabel("Delay:")
+        lbl_delay.setFixedWidth(40)
         self.spn_delay = QDoubleSpinBox()
         self.spn_delay.setFixedHeight(32)
         self.spn_delay.setRange(-2.0, 5.0)
@@ -336,6 +337,7 @@ class MainWindow(QMainWindow):
         self.txt_clone.setPlaceholderText("(Optional) Select reference audio...")
         self.btn_browse_clone = QPushButton("📁")
         self.btn_browse_clone.setFixedSize(38, 32)
+        self.btn_browse_clone.setStyleSheet("background-color: #F8FAFC; color: #0F172A; font-size: 14px; border: 1px solid #CBD5E1; border-radius: 6px;")
         h_clone.addWidget(self.txt_clone)
         h_clone.addWidget(self.btn_browse_clone)
         layout_tts.addLayout(h_clone, 2, 1)
@@ -344,14 +346,15 @@ class MainWindow(QMainWindow):
         # Group ⑤ Export
         grp_export = QGroupBox("⑤ Export")
         layout_export = QGridLayout(grp_export)
-        layout_export.setContentsMargins(16, 18, 16, 14)
-        layout_export.setVerticalSpacing(10)
+        layout_export.setContentsMargins(16, 16, 16, 14)
+        layout_export.setVerticalSpacing(8)
         layout_export.setHorizontalSpacing(14)
         layout_export.setColumnStretch(0, 0)
         layout_export.setColumnStretch(1, 1)
         layout_export.setColumnMinimumWidth(0, 110)
 
         h_sub_opts = QHBoxLayout()
+        h_sub_opts.setSpacing(20)
         self.chk_burn_sub = QCheckBox("Burn translated subtitles into video")
         self.chk_burn_sub.setChecked(True)
         self.chk_blur_orig = QCheckBox("Blur original subtitles")
@@ -366,7 +369,7 @@ class MainWindow(QMainWindow):
         self.cbo_font.setFixedHeight(32)
         self.cbo_font.addItems(["Arial", "DejaVu Sans Bold", "Montserrat", "Segoe UI"])
         lbl_size = QLabel("Size:")
-        lbl_size.setFixedWidth(46)
+        lbl_size.setFixedWidth(38)
         self.spn_font_size = QSpinBox()
         self.spn_font_size.setFixedHeight(32)
         self.spn_font_size.setRange(10, 100)
@@ -383,7 +386,7 @@ class MainWindow(QMainWindow):
         self.cbo_encoder.setFixedHeight(32)
         self.cbo_encoder.addItems(["libx264 (CPU)", "copy (Passthrough - Instant)"])
         lbl_quality = QLabel("Quality:")
-        lbl_quality.setFixedWidth(46)
+        lbl_quality.setFixedWidth(48)
         self.cbo_quality = QComboBox()
         self.cbo_quality.setFixedHeight(32)
         self.cbo_quality.addItems(["Best", "1080p", "720p"])
@@ -399,6 +402,7 @@ class MainWindow(QMainWindow):
         self.txt_output_dir.setFixedHeight(32)
         self.btn_browse_out = QPushButton("Browse...")
         self.btn_browse_out.setFixedHeight(32)
+        self.btn_browse_out.setStyleSheet("background-color: #F8FAFC; color: #0F172A; font-weight: 500; font-size: 12px; border: 1px solid #CBD5E1; border-radius: 6px; padding: 0 16px;")
         self.btn_browse_out.clicked.connect(self.action_browse_output_dir)
         h_out.addWidget(self.txt_output_dir)
         h_out.addWidget(self.btn_browse_out)
@@ -458,7 +462,7 @@ class MainWindow(QMainWindow):
         # 6. TERMINAL CONSOLE LOG VIEWER
         self.txt_console = QTextEdit()
         self.txt_console.setReadOnly(True)
-        self.txt_console.setFixedHeight(150)
+        self.txt_console.setFixedHeight(110)
         self.txt_console.setFont(QFont("Consolas", 10))
         self.txt_console.setStyleSheet("""
             QTextEdit {
@@ -479,6 +483,8 @@ class MainWindow(QMainWindow):
         """Apply high-contrast, polished stylesheet compatible with both Light and Dark Windows themes."""
         icon_up = (Config.BASE_DIR / "assets" / "icons" / "arrow_up.svg").resolve().as_posix()
         icon_down = (Config.BASE_DIR / "assets" / "icons" / "arrow_down.svg").resolve().as_posix()
+        icon_chk_checked = (Config.BASE_DIR / "assets" / "icons" / "checkbox_checked.svg").resolve().as_posix()
+        icon_chk_un = (Config.BASE_DIR / "assets" / "icons" / "checkbox_unchecked.svg").resolve().as_posix()
 
         self.setStyleSheet(f"""
             QMainWindow {{
@@ -515,8 +521,9 @@ class MainWindow(QMainWindow):
                 font-size: 13px;
                 border: 1px solid #CBD5E1;
                 border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 16px;
+                margin-top: 8px;
+                padding-top: 14px;
+                padding-bottom: 8px;
                 background-color: #FFFFFF;
                 color: #0F172A;
             }}
@@ -535,18 +542,19 @@ class MainWindow(QMainWindow):
             QCheckBox {{
                 color: #1E293B;
                 font-size: 12px;
-                spacing: 6px;
+                spacing: 8px;
             }}
             QCheckBox::indicator {{
                 width: 16px;
                 height: 16px;
-                border: 1px solid #94A3B8;
-                border-radius: 3px;
-                background-color: #FFFFFF;
+                border: none;
+                background-color: transparent;
+            }}
+            QCheckBox::indicator:unchecked {{
+                image: url("{icon_chk_un}");
             }}
             QCheckBox::indicator:checked {{
-                background-color: #2563EB;
-                border-color: #2563EB;
+                image: url("{icon_chk_checked}");
             }}
             QPushButton {{
                 background-color: #FFFFFF;
