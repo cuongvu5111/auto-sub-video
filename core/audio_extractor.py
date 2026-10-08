@@ -3,11 +3,15 @@ Module trích xuất âm thanh từ tệp video.
 Chuyển đổi âm thanh sang định dạng chuẩn WAV 16kHz mono phục vụ mô hình Whisper.
 """
 
+import sys
 import subprocess
 import shutil
 from pathlib import Path
 from typing import Optional
 from config import Config
+
+# Cờ ẩn cửa sổ console phụ trên Windows khi chạy FFmpeg
+SUBPROCESS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
 class AudioExtractionError(Exception):
@@ -96,7 +100,8 @@ def extract_audio(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            check=True
+            check=True,
+            creationflags=SUBPROCESS_NO_WINDOW
         )
         if not target_wav.exists() or target_wav.stat().st_size == 0:
             raise AudioExtractionError("Tệp âm thanh sinh ra bị rỗng hoặc không tồn tại.")

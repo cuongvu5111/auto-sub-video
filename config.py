@@ -5,7 +5,11 @@ Tệp quản lý cấu hình tập trung cho AutoSub Dubbing Studio.
 
 import sys
 import os
+import subprocess
 from pathlib import Path
+
+# Cờ ẩn cửa sổ console phụ khi gọi subprocess trên Windows (tránh hiện popup terminal đen)
+SUBPROCESS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 # Xác định thư mục gốc ứng dụng (hỗ trợ cả môi trường dev lẫn exe đóng gói bằng PyInstaller)
 if getattr(sys, "frozen", False):
@@ -131,7 +135,8 @@ class Config:
                     [str(ffmpeg_bin), "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.04", "-c:v", "h264_nvenc", "-f", "null", "-"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    timeout=3
+                    timeout=3,
+                    creationflags=SUBPROCESS_NO_WINDOW
                 )
                 if res.returncode == 0:
                     capabilities["has_nvenc"] = True

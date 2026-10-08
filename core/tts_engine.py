@@ -22,6 +22,10 @@ if sys.platform == "win32":
         pass
 
 
+# Cờ ẩn cửa sổ console phụ trên Windows khi chạy FFmpeg
+SUBPROCESS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
 class TTSError(Exception):
     """Lỗi xảy ra trong quá trình tạo giọng đọc hoặc đồng bộ thời lượng."""
     pass
@@ -41,7 +45,13 @@ def get_audio_duration(file_path: Path | str) -> float:
     cmd = [ffmpeg_bin, "-i", str(file_obj)]
 
     # FFmpeg in thông tin media ra stderr
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=SUBPROCESS_NO_WINDOW
+    )
     match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", result.stderr)
     if match:
         hours = float(match.group(1))
@@ -66,7 +76,13 @@ def generate_silence_audio(output_file: Path, duration: float) -> Path:
         "-c:a", "libmp3lame", "-b:a", "48k",
         str(output_file)
     ]
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+        creationflags=SUBPROCESS_NO_WINDOW
+    )
     return output_file
 
 
@@ -177,7 +193,14 @@ def adjust_audio_speed(
     ]
 
     try:
-        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+            creationflags=SUBPROCESS_NO_WINDOW
+        )
         return output_file
     except subprocess.CalledProcessError as e:
         error_msg = e.stderr[-300:] if e.stderr else str(e)

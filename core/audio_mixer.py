@@ -22,6 +22,10 @@ if sys.platform == "win32":
         pass
 
 
+# Cờ ẩn cửa sổ console phụ trên Windows khi chạy FFmpeg
+SUBPROCESS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
 class AudioMixerError(Exception):
     """Lỗi xảy ra trong quá trình hòa âm hoặc render video."""
     pass
@@ -225,6 +229,18 @@ def _init_pydub():
 
     pydub.utils.mediainfo_json = _av_mediainfo
     pydub.audio_segment.mediainfo_json = _av_mediainfo
+
+    # 4. Ngăn chặn pydub mở cửa sổ console phụ trên Windows khi gọi subprocess ffmpeg
+    if sys.platform == "win32":
+        _orig_sub_popen = subprocess.Popen
+        def _silent_popen(*args, **kwargs):
+            kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+            return _orig_sub_popen(*args, **kwargs)
+
+        if hasattr(pydub.audio_segment, "subprocess"):
+            pydub.audio_segment.subprocess.Popen = _silent_popen
+        if hasattr(pydub.utils, "Popen"):
+            pydub.utils.Popen = _silent_popen
 
 
 def _load_audio_file(file_path: Union[str, Path]):
@@ -456,7 +472,8 @@ def render_final_video(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            check=True
+            check=True,
+            creationflags=SUBPROCESS_NO_WINDOW
         )
         if not out_video.exists() or out_video.stat().st_size == 0:
             raise AudioMixerError("Tệp video xuất ra bị rỗng hoặc không tồn tại.")
@@ -485,7 +502,8 @@ def render_final_video(
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    check=True
+                    check=True,
+                    creationflags=SUBPROCESS_NO_WINDOW
                 )
                 if out_video.exists() and out_video.stat().st_size > 0:
                     if progress_callback:
