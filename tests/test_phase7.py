@@ -76,9 +76,56 @@ def test_paste_links_dialog():
     print("✓ test_paste_links_dialog: PASSED (Khởi tạo, styling và bóc tách URL hoàn hảo)")
 
 
+def test_cookie_button_and_management():
+    """Kiểm tra nút quản lý Cookies, trạng thái hiển thị động và các slot liên quan."""
+    from PySide6.QtWidgets import QApplication
+    from gui import MainWindow
+    from config import Config
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    win = MainWindow()
+
+    assert hasattr(win, "btn_cookies"), "MainWindow thiếu thuộc tính btn_cookies"
+    assert hasattr(win, "update_cookie_button_state"), "MainWindow thiếu phương thức update_cookie_button_state"
+    assert hasattr(win, "action_manage_cookies"), "MainWindow thiếu phương thức action_manage_cookies"
+
+    cookie_file = Config.BASE_DIR / "cookies.txt"
+    backup_file = Config.BASE_DIR / "cookies.txt.bak_test"
+
+    try:
+        # Nếu đang có cookies.txt thật, backup tạm thời
+        if cookie_file.exists():
+            cookie_file.rename(backup_file)
+
+        # 1. Trạng thái khi chưa có cookie
+        win.update_cookie_button_state()
+        assert win.btn_cookies.text() == "🍪 Cookies (.txt)"
+
+        # 2. Trạng thái khi có cookie file
+        cookie_file.write_text("# Netscape HTTP Cookie File\n.douyin.com\tTRUE\t/\tFALSE\t0\tsid_guard\t123456\n", encoding="utf-8")
+        win.update_cookie_button_state()
+        assert "Active ✓" in win.btn_cookies.text()
+        assert "#10B981" in win.btn_cookies.styleSheet()
+
+        # 3. Trạng thái sau khi xóa cookie
+        cookie_file.unlink(missing_ok=True)
+        win.update_cookie_button_state()
+        assert win.btn_cookies.text() == "🍪 Cookies (.txt)"
+
+    finally:
+        # Khôi phục trạng thái ban đầu
+        if cookie_file.exists():
+            cookie_file.unlink(missing_ok=True)
+        if backup_file.exists():
+            backup_file.rename(cookie_file)
+
+    print("✓ test_cookie_button_and_management: PASSED (Nút Cookies, đổi trạng thái động và dọn dẹp hoạt động chuẩn xác)")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 7 ===")
     test_gui_syntax_and_structure()
     test_worker_signals_and_button_recovery()
     test_paste_links_dialog()
+    test_cookie_button_and_management()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 7 ĐÃ VƯỢT QUA ===")

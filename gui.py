@@ -6,6 +6,7 @@ dual-column settings, smooth progress bar, and real-time terminal console log.
 
 import sys
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -691,6 +692,7 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
         self.apply_styles()
+        self.update_cookie_button_state()
 
     def init_ui(self):
         central_widget = QWidget()
@@ -733,6 +735,8 @@ class MainWindow(QMainWindow):
         self.btn_paste_links.setFixedHeight(32)
         self.btn_add_files = QPushButton("+ Add Videos...")
         self.btn_add_files.setFixedHeight(32)
+        self.btn_cookies = QPushButton("🍪 Cookies (.txt)")
+        self.btn_cookies.setFixedHeight(32)
         self.btn_attach_srt = QPushButton("Attach .srt to Selected...")
         self.btn_attach_srt.setFixedHeight(32)
         self.btn_remove_row = QPushButton("Remove Selected")
@@ -741,10 +745,12 @@ class MainWindow(QMainWindow):
 
         self.btn_paste_links.clicked.connect(self.action_paste_links)
         self.btn_add_files.clicked.connect(self.action_add_files)
+        self.btn_cookies.clicked.connect(self.action_manage_cookies)
         self.btn_remove_row.clicked.connect(self.action_remove_selected_rows)
 
         queue_toolbar.addWidget(self.btn_paste_links)
         queue_toolbar.addWidget(self.btn_add_files)
+        queue_toolbar.addWidget(self.btn_cookies)
         queue_toolbar.addWidget(self.btn_attach_srt)
         queue_toolbar.addWidget(self.btn_remove_row)
         queue_toolbar.addStretch()
@@ -1570,6 +1576,74 @@ class MainWindow(QMainWindow):
             self.table_queue.removeRow(row)
         self.lbl_stats.setText(f"{self.table_queue.rowCount()} video(s) in queue")
         self.update_control_buttons()
+
+    def update_cookie_button_state(self):
+        """Cập nhật giao diện nút Cookies theo trạng thái tồn tại của tệp cookies.txt."""
+        cookie_path = Config.BASE_DIR / "cookies.txt"
+        if cookie_path.exists() and cookie_path.stat().st_size > 0:
+            self.btn_cookies.setText("🍪 Cookies: Active ✓")
+            self.btn_cookies.setToolTip(f"Active cookies loaded from:\n{cookie_path}\nClick to replace or remove.")
+            self.btn_cookies.setStyleSheet(
+                "QPushButton { background-color: #ECFDF5; color: #065F46; border: 1px solid #10B981; font-weight: bold; border-radius: 6px; padding: 4px 12px; }"
+                "QPushButton:hover { background-color: #D1FAE5; border-color: #059669; }"
+            )
+        else:
+            self.btn_cookies.setText("🍪 Cookies (.txt)")
+            self.btn_cookies.setToolTip("Import cookies.txt for Douyin / TikTok download access.")
+            self.btn_cookies.setStyleSheet("")
+
+    @Slot()
+    def action_manage_cookies(self):
+        """Quản lý hoặc nạp tệp cookies.txt để vượt tường lửa Douyin và TikTok."""
+        cookie_path = Config.BASE_DIR / "cookies.txt"
+
+        if cookie_path.exists():
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Manage Cookies")
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setText("<b>Active Cookies Detected</b>")
+            msg_box.setInformativeText(
+                f"Currently using cookies file:\n{cookie_path}\n\n"
+                "You can import a new cookies file to replace it, or remove the existing cookies."
+            )
+            btn_replace = msg_box.addButton("Replace Cookies...", QMessageBox.AcceptRole)
+            btn_remove = msg_box.addButton("Remove Cookies", QMessageBox.DestructiveRole)
+            btn_cancel = msg_box.addButton("Cancel", QMessageBox.RejectRole)
+            msg_box.setDefaultButton(btn_replace)
+            msg_box.exec()
+
+            clicked = msg_box.clickedButton()
+            if clicked == btn_cancel:
+                return
+            elif clicked == btn_remove:
+                try:
+                    cookie_path.unlink(missing_ok=True)
+                    self.update_cookie_button_state()
+                    self.append_log("🗑️ Đã gỡ bỏ file cookies.txt.")
+                    QMessageBox.information(self, "Cookies Removed", "cookies.txt has been removed successfully.")
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to delete cookies.txt: {e}")
+                return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select cookies.txt File",
+            "",
+            "Text Files (*.txt);;All Files (*.*)"
+        )
+        if file_path:
+            try:
+                shutil.copyfile(file_path, cookie_path)
+                self.update_cookie_button_state()
+                self.append_log(f"🍪 Đã nạp thành công cookies.txt từ: {file_path}")
+                QMessageBox.information(
+                    self,
+                    "Cookies Loaded",
+                    f"cookies.txt was successfully imported!\n\nLocation: {cookie_path}\n"
+                    "Douyin & TikTok downloads will now use these session credentials."
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to import cookies file: {e}")
 
     @Slot()
     def action_browse_output_dir(self):
