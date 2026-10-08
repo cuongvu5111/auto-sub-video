@@ -146,6 +146,46 @@ def test_hardware_capabilities_detection():
     print("✓ test_hardware_capabilities_detection: PASSED")
 
 
+def test_render_final_video_preserve_original_audio():
+    """Kiểm tra render_final_video với mixed_audio_path=None (giữ nguyên track âm thanh gốc của video)."""
+    import subprocess
+    from core.audio_mixer import render_final_video
+    from core.audio_extractor import find_ffmpeg
+
+    ffmpeg_bin = find_ffmpeg()
+    temp_dir = root_dir / "temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    dummy_video = temp_dir / "test_orig_audio.mp4"
+    out_video = temp_dir / "test_out_preserved.mp4"
+
+    # 1. Tạo 1 video mẫu 1 giây có âm thanh sóng sine bằng ffmpeg lavfi
+    cmd_gen = [
+        ffmpeg_bin, "-y",
+        "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1",
+        "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
+        "-c:v", "libx264", "-c:a", "aac",
+        str(dummy_video)
+    ]
+    subprocess.run(cmd_gen, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    assert dummy_video.exists() and dummy_video.stat().st_size > 0
+
+    # 2. Render video với mixed_audio_path=None và không có subtitle
+    rendered_path = render_final_video(
+        original_video_path=dummy_video,
+        mixed_audio_path=None,
+        output_video_path=out_video
+    )
+    assert rendered_path.exists() and rendered_path.stat().st_size > 0
+
+    # 3. Kiểm tra file xuất ra có track audio
+    import av
+    with av.open(str(rendered_path)) as container:
+        assert len(container.streams.video) > 0, "Video stream missing"
+        assert len(container.streams.audio) > 0, "Audio stream must be preserved"
+
+    print("✓ test_render_final_video_preserve_original_audio: PASSED (Giữ trọn vẹn track âm thanh gốc)")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 6 ===")
     test_ass_timestamp_formatting()
@@ -155,5 +195,6 @@ if __name__ == "__main__":
     test_ass_subtitle_positioning()
     test_ass_text_watermark()
     test_hardware_capabilities_detection()
+    test_render_final_video_preserve_original_audio()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 6 ĐÃ VƯỢT QUA ===")
 

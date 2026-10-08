@@ -291,6 +291,39 @@ def test_subtitle_live_preview_and_dialog():
     print("✓ test_subtitle_live_preview_and_dialog: PASSED (Canvas, Dialog, Hardsub Box và đồng bộ 2 chiều hoàn hảo)")
 
 
+def test_toggle_dubbing_ui():
+    """Kiểm tra checkbox bật/tắt lồng tiếng (Voice Dubbing) trên MainWindow."""
+    from gui import MainWindow
+    win = MainWindow()
+
+    # 1. Kiểm tra tồn tại checkbox chk_enable_dubbing và mặc định là True
+    assert hasattr(win, "chk_enable_dubbing")
+    assert win.chk_enable_dubbing.isChecked() is True
+    assert win.cbo_voice.isEnabled() is True
+    assert win.spn_ducking.isEnabled() is True
+
+    # 2. Tắt lồng tiếng: chuyển sang False
+    win.chk_enable_dubbing.setChecked(False)
+    assert win.chk_enable_dubbing.isChecked() is False
+    assert win.cbo_voice.isEnabled() is False
+    assert win.spn_ducking.isEnabled() is False
+    assert win.spn_delay.isEnabled() is False
+    assert win.txt_clone.isEnabled() is False
+    assert win.btn_browse_clone.isEnabled() is False
+    assert "Preserves 100% original video audio" in win.lbl_dub_hint.text()
+
+    # 3. Bật lại lồng tiếng: chuyển sang True
+    win.chk_enable_dubbing.setChecked(True)
+    assert win.chk_enable_dubbing.isChecked() is True
+    assert win.cbo_voice.isEnabled() is True
+    assert win.spn_ducking.isEnabled() is True
+    assert win.spn_delay.isEnabled() is True
+    assert win.txt_clone.isEnabled() is True
+    assert win.btn_browse_clone.isEnabled() is True
+
+    print("✓ test_toggle_dubbing_ui: PASSED (Bật/tắt lồng tiếng AI & giữ âm thanh gốc hoạt động chuẩn xác)")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 7 ===")
     test_gui_syntax_and_structure()
@@ -301,4 +334,5 @@ if __name__ == "__main__":
     test_watermark_spinbox_and_persistence()
     test_watermark_live_preview_canvas()
     test_subtitle_live_preview_and_dialog()
+    test_toggle_dubbing_ui()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 7 ĐÃ VƯỢT QUA ===")

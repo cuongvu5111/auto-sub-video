@@ -37,6 +37,7 @@ def run_pipeline(
     watermark_options: Optional[Dict[str, Any]] = None,
     encoder: Optional[str] = None,
     output_dir: Optional[Path] = None,
+    enable_dubbing: bool = True,
     progress_callback: Optional[Callable[[str, float], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None
 ) -> Path:
@@ -119,27 +120,34 @@ def run_pipeline(
     check_cancel()
 
     # STEP 5: AI voice synthesis and atempo synchronization
-    report("Step 5/6: Synthesizing AI voice dubbing and syncing tempo...", 68.0)
-    dubbed_segments = process_dubbing_segments(
-        translated_segments,
-        voice=voice,
-        progress_callback=lambda m, p: report(f"Step 5/6: {m}", 68.0 + p * 0.17),
-        cancel_check=cancel_check
-    )
+    if enable_dubbing:
+        report("Step 5/6: Synthesizing AI voice dubbing and syncing tempo...", 68.0)
+        dubbed_segments = process_dubbing_segments(
+            translated_segments,
+            voice=voice,
+            progress_callback=lambda m, p: report(f"Step 5/6: {m}", 68.0 + p * 0.17),
+            cancel_check=cancel_check
+        )
+    else:
+        report("Step 5/6: AI voice dubbing disabled. Preserving original video audio...", 75.0)
+        dubbed_segments = translated_segments
 
     check_cancel()
 
     # STEP 6: Audio ducking and video rendering
-    report("Step 6/6: Mixing audio and rendering final video...", 88.0)
-    
-    # 6a. Create mixed audio track
-    mixed_audio_file = Config.TEMP_DIR / f"{video_path.stem}_mixed.mp3"
-    create_mixed_audio_track(
-        raw_audio_path,
-        dubbed_segments,
-        mixed_audio_file,
-        ducking_volume=ducking_volume
-    )
+    if enable_dubbing:
+        report("Step 6/6: Mixing audio and rendering final video...", 88.0)
+        # 6a. Create mixed audio track
+        mixed_audio_file = Config.TEMP_DIR / f"{video_path.stem}_mixed.mp3"
+        create_mixed_audio_track(
+            raw_audio_path,
+            dubbed_segments,
+            mixed_audio_file,
+            ducking_volume=ducking_volume
+        )
+    else:
+        report("Step 6/6: Burning subtitles and rendering with original audio...", 88.0)
+        mixed_audio_file = None
 
     check_cancel()
 
@@ -164,7 +172,7 @@ def run_pipeline(
             dubbed_segments if burn_subtitles else [],
             ass_file,
             font_name=sub_opts.get("font_name", "Arial"),
-            font_size=sub_opts.get("font_size", 24),
+            font_size=sub_opts.get("font_size", 46),
             primary_color=sub_opts.get("primary_color", "&H00000000"),
             outline_color=sub_opts.get("outline_color", "&H00FFFFFF"),
             back_color=sub_opts.get("back_color", "&H00FFFFFF"),
@@ -206,6 +214,7 @@ def main():
     parser.add_argument("--voice", "-v", default=Config.DEFAULT_VOICE, help="Giọng lồng tiếng (NamMinh / HoaiMy)")
     parser.add_argument("--ducking", "-d", type=float, default=Config.DEFAULT_DUCKING_VOLUME, help="Âm lượng tiếng nền (mặc định 0.10)")
     parser.add_argument("--no-sub", action="store_true", help="Không nung phụ đề vào video")
+    parser.add_argument("--no-dub", action="store_true", help="Không lồng tiếng AI (giữ nguyên âm thanh gốc)")
     parser.add_argument("--output", "-o", default=str(Config.OUTPUT_DIR), help="Thư mục xuất video")
 
     args = parser.parse_args()
@@ -216,6 +225,7 @@ def main():
             voice=args.voice,
             ducking_volume=args.ducking,
             burn_subtitles=not args.no_sub,
+            enable_dubbing=not args.no_dub,
             output_dir=Path(args.output)
         )
         print(f"\n✓ THÀNH CÔNG: {final_path}")

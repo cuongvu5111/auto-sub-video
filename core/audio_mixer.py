@@ -332,7 +332,7 @@ def create_mixed_audio_track(
 
 def render_final_video(
     original_video_path: Path,
-    mixed_audio_path: Path,
+    mixed_audio_path: Optional[Path],
     output_video_path: Path,
     ass_subtitle_path: Optional[Path] = None,
     watermark_options: Optional[Dict[str, Any]] = None,
@@ -342,25 +342,34 @@ def render_final_video(
 ) -> Path:
     """
     Đóng gói video hoàn thiện bằng FFmpeg:
-    - Thay thế track âm thanh gốc bằng track âm thanh đã hòa âm.
+    - Nếu có mixed_audio_path: Thay thế track âm thanh gốc bằng track âm thanh đã hòa âm (có lồng tiếng).
+    - Nếu mixed_audio_path là None: Giữ nguyên 100% âm thanh gốc của video.
     - Nung phụ đề .ass trực tiếp vào khung hình (nếu có yêu cầu).
     - Chèn Logo Watermark (vị trí tùy biến, độ mờ Opacity, tự động co tỉ lệ).
     - Tự động dùng bộ mã hóa phần cứng h264_nvenc nếu có GPU NVIDIA, tự động fallback về libx264 nếu lỗi.
     """
     orig_video = Path(original_video_path).resolve()
-    mixed_audio = Path(mixed_audio_path).resolve()
     out_video = Path(output_video_path).resolve()
     out_video.parent.mkdir(parents=True, exist_ok=True)
 
     if not orig_video.exists():
         raise FileNotFoundError(f"Không tìm thấy video gốc: {original_video_path}")
-    if not mixed_audio.exists():
-        raise FileNotFoundError(f"Không tìm thấy file audio đã hòa âm: {mixed_audio_path}")
+
+    has_mixed_audio = False
+    mixed_audio = None
+    if mixed_audio_path:
+        candidate_audio = Path(mixed_audio_path).resolve()
+        if candidate_audio.exists():
+            mixed_audio = candidate_audio
+            has_mixed_audio = True
+        else:
+            raise FileNotFoundError(f"Không tìm thấy file audio đã hòa âm: {mixed_audio_path}")
 
     ffmpeg_bin = find_ffmpeg()
 
     if progress_callback:
-        progress_callback("Đang tiến hành ghép âm thanh và xuất video thành phẩm...", 70.0)
+        action_msg = "Đang tiến hành ghép âm thanh và xuất video thành phẩm..." if has_mixed_audio else "Đang nung phụ đề và xuất video (giữ âm thanh gốc)..."
+        progress_callback(action_msg, 70.0)
 
     has_sub = bool(ass_subtitle_path and Path(ass_subtitle_path).exists())
 
@@ -392,16 +401,20 @@ def render_final_video(
         cmd = [
             ffmpeg_bin,
             "-y",
-            "-i", str(orig_video),
-            "-i", str(mixed_audio)
+            "-i", str(orig_video)
         ]
+        if has_mixed_audio:
+            cmd.extend(["-i", str(mixed_audio)])
 
         filter_chains = []
         curr_v = "0:v"
 
         if has_logo:
             cmd.extend(["-i", str(logo_path)])
-            # logo stream là luồng video thứ 3 (index 2:v)
+            # Xác định index của luồng logo
+            # Nếu có mixed_audio (input 1) -> logo là index 2:v
+            # Nếu không có mixed_audio -> logo là index 1:v
+            logo_input_idx = 2 if has_mixed_audio else 1
             opacity = float(watermark_options.get("logo_opacity", 0.8))
             opacity = max(0.05, min(1.0, opacity))
             max_w = int(watermark_options.get("logo_max_width", 160))
@@ -417,7 +430,7 @@ def render_final_video(
             }
             pos_expr = pos_expr_map.get(pos_key, "main_w-overlay_w-24:24")
 
-            filter_chains.append(f"[2:v]scale={max_w}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[logo]")
+            filter_chains.append(f"[{logo_input_idx}:v]scale={max_w}:-1,format=rgba,colorchannelmixer=aa={opacity:.2f}[logo]")
             filter_chains.append(f"[{curr_v}][logo]overlay={pos_expr}[v_logo]")
             curr_v = "v_logo"
 
@@ -442,31 +455,44 @@ def render_final_video(
         else:
             video_codec_args = ["-c:v", "libx264", "-preset", "fast", "-crf", "22"]
 
+        if has_mixed_audio:
+            audio_map_args = ["-map", "1:a", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+        else:
+            # Giữ nguyên âm thanh gốc: map từ 0:a?
+            audio_map_args = ["-map", "0:a?", "-c:a", "aac", "-b:a", "192k"]
+
         cmd.extend([
             "-filter_complex", filter_complex_str,
             "-map", "[v]",
-            "-map", "1:a",
+            *audio_map_args,
             *video_codec_args,
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-shortest",
             str(out_video)
         ])
     else:
-        # Trường hợp không có phụ đề lẫn logo: copy thẳng luồng video để xuất cực nhanh
-        cmd = [
-            ffmpeg_bin,
-            "-y",
-            "-i", str(orig_video),
-            "-i", str(mixed_audio),
-            "-map", "0:v:0",
-            "-map", "1:a:0",
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-shortest",
-            str(out_video)
-        ]
+        # Trường hợp không có phụ đề lẫn logo
+        if has_mixed_audio:
+            cmd = [
+                ffmpeg_bin,
+                "-y",
+                "-i", str(orig_video),
+                "-i", str(mixed_audio),
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-shortest",
+                str(out_video)
+            ]
+        else:
+            # Không có phụ đề lẫn logo và giữ nguyên âm thanh gốc: copy passthrough
+            cmd = [
+                ffmpeg_bin,
+                "-y",
+                "-i", str(orig_video),
+                "-c", "copy",
+                str(out_video)
+            ]
 
     def run_ffmpeg_cancellable(exec_cmd):
         proc = subprocess.Popen(

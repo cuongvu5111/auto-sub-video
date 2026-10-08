@@ -89,6 +89,7 @@ class DubbingWorker(QThread):
                         watermark_options=self.options.get("watermark_options"),
                         encoder=self.options.get("encoder"),
                         output_dir=self.options.get("output_dir"),
+                        enable_dubbing=self.options.get("enable_dubbing", True),
                         progress_callback=progress_hook,
                         cancel_check=lambda: self._is_cancelled
                     )
@@ -445,8 +446,10 @@ class WatermarkPreviewCanvas(QWidget):
         # 5. Render Text Watermark (matches ASS subtitle WatermarkStyle)
         if self.text_enabled and self.text_content:
             scale_h = canvas_h / ref_h
-            font_pt = max(8, int(round(self.text_font_size * scale_h * 1.35)))
-            wm_font = QFont("Arial", font_pt, QFont.Bold)
+            wm_font_px = max(6, int(round(self.text_font_size * scale_h)))
+            wm_font = QFont("Arial")
+            wm_font.setPixelSize(wm_font_px)
+            wm_font.setBold(True)
             p.setFont(wm_font)
             fm = QFontMetrics(wm_font)
 
@@ -1131,14 +1134,17 @@ class SubtitlePreviewCanvas(QWidget):
             p.setPen(QColor(148, 163, 184, 80))
             p.drawText(QRectF(canvas_x, canvas_y + canvas_h * 0.42 + 22, canvas_w, 20), Qt.AlignCenter, f"{int(ref_w)} x {int(ref_h)}")
 
-        # 4. Render Subtitle and Hardsub Cover Box
+        # 4. Render Subtitle and Hardsub Cover Box (1:1 chuẩn xác theo FFmpeg LibASS)
         scale_h = canvas_h / ref_h
         scale_w = canvas_w / ref_w
 
-        # Font sizing proportional to video reference resolution
-        font_pt = max(8, int(round(self.font_size * scale_h * 1.32)))
+        # Trong ASS, Fontsize tính bằng pixel theo chiều cao chuẩn PlayResY (1280).
+        # Trên canvas có chiều cao canvas_h, kích thước font chính xác 1:1 là:
+        canvas_font_px = max(6, int(round(self.font_size * scale_h)))
         font_fam = self.font_name if self.font_name else "Arial"
-        sub_font = QFont(font_fam, font_pt, QFont.Bold)
+        sub_font = QFont(font_fam)
+        sub_font.setPixelSize(canvas_font_px)
+        sub_font.setBold(True)
         p.setFont(sub_font)
         fm = QFontMetrics(sub_font)
 
@@ -1148,7 +1154,7 @@ class SubtitlePreviewCanvas(QWidget):
             lines = ["Phụ đề tiếng Việt mẫu"]
 
         line_height = fm.height()
-        line_spacing = max(2, int(4 * scale_h))
+        line_spacing = max(1, int(round(3 * scale_h)))
         total_text_h = len(lines) * line_height + (len(lines) - 1) * line_spacing
 
         max_line_w = 0
@@ -1157,11 +1163,11 @@ class SubtitlePreviewCanvas(QWidget):
             if tw > max_line_w:
                 max_line_w = tw
 
-        # Padding around text
-        pad_x = (self.box_padding + 10) * scale_w
-        pad_y = (self.box_padding + 4) * scale_h
+        # Padding xung quanh chữ chuẩn LibASS (outline_width co giãn theo scale)
+        pad_x = max(2.0, float(self.box_padding) * scale_w + 3.0 * scale_w)
+        pad_y = max(2.0, float(self.box_padding) * scale_h + 1.5 * scale_h)
 
-        bw = min(canvas_w - 24.0, max_line_w + pad_x * 2.0)
+        bw = min(canvas_w - 12.0, max_line_w + pad_x * 2.0)
         bh = total_text_h + pad_y * 2.0
         bx = canvas_rect.left() + (canvas_w - bw) / 2.0
 
@@ -1585,25 +1591,62 @@ class SubtitlePreviewDialog(QDialog):
         h_pad.addWidget(self.spn_padding)
         style_layout.addLayout(h_pad, 1, 1)
 
-        style_layout.addWidget(QLabel("Font & Size:"), 2, 0)
-        h_font_row = QHBoxLayout()
+        style_layout.addWidget(QLabel("Font:"), 2, 0)
         self.cbo_font_name = QComboBox()
         self.cbo_font_name.setFixedHeight(30)
         self.cbo_font_name.addItems(["Arial", "DejaVu Sans Bold", "Montserrat", "Segoe UI"])
         self.cbo_font_name.currentTextChanged.connect(self.refresh_canvas)
-        h_font_row.addWidget(self.cbo_font_name, stretch=1)
+        style_layout.addWidget(self.cbo_font_name, 2, 1)
+
+        style_layout.addWidget(QLabel("Font Size:"), 3, 0)
+        h_font_sz = QHBoxLayout()
+        self.slider_font_sz = QSlider(Qt.Horizontal)
+        self.slider_font_sz.setRange(16, 96)
+        self.slider_font_sz.setValue(46)
+        self.slider_font_sz.valueChanged.connect(self.on_font_slider_changed)
+        h_font_sz.addWidget(self.slider_font_sz, stretch=1)
 
         self.spn_font_sz = QSpinBox()
-        self.spn_font_sz.setRange(12, 72)
-        self.spn_font_sz.setValue(32)
+        self.spn_font_sz.setRange(14, 120)
+        self.spn_font_sz.setValue(46)
         self.spn_font_sz.setSuffix(" pt")
         self.spn_font_sz.setFixedWidth(78)
         self.spn_font_sz.setFixedHeight(30)
-        self.spn_font_sz.valueChanged.connect(self.refresh_canvas)
-        h_font_row.addWidget(self.spn_font_sz)
-        style_layout.addLayout(h_font_row, 2, 1)
+        self.spn_font_sz.valueChanged.connect(self.on_font_spin_changed)
+        h_font_sz.addWidget(self.spn_font_sz)
+        style_layout.addLayout(h_font_sz, 3, 1)
 
-        style_layout.addWidget(QLabel("Colors:"), 3, 0)
+        # Quick size presets buttons
+        h_sz_presets = QHBoxLayout()
+        h_sz_presets.setSpacing(6)
+        lbl_quick = QLabel("Quick Size:")
+        lbl_quick.setStyleSheet("font-size: 11px; color: #64748B;")
+        h_sz_presets.addWidget(lbl_quick)
+        for label, sz in [("Small 32", 32), ("Medium 44", 44), ("Cover Sub 52", 52), ("Large 60", 60)]:
+            btn = QPushButton(label)
+            btn.setFixedHeight(22)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #F1F5F9;
+                    color: #0F172A;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    font-weight: 500;
+                    padding: 0 4px;
+                }
+                QPushButton:hover {
+                    background-color: #EFF6FF;
+                    color: #1D4ED8;
+                    border-color: #93C5FD;
+                }
+            """)
+            btn.clicked.connect(lambda chk, s=sz: self.set_quick_font_size(s))
+            h_sz_presets.addWidget(btn)
+        h_sz_presets.addStretch()
+        style_layout.addLayout(h_sz_presets, 4, 1)
+
+        style_layout.addWidget(QLabel("Colors:"), 5, 0)
         h_colors = QHBoxLayout()
         h_colors.setSpacing(10)
         self.btn_text_color = QPushButton("Text Color")
@@ -1617,7 +1660,7 @@ class SubtitlePreviewDialog(QDialog):
         self.btn_bg_color.setCursor(Qt.PointingHandCursor)
         self.btn_bg_color.clicked.connect(self.action_choose_bg_color)
         h_colors.addWidget(self.btn_bg_color)
-        style_layout.addLayout(h_colors, 3, 1)
+        style_layout.addLayout(h_colors, 5, 1)
         left_layout.addWidget(grp_style)
 
         # --- GROUP 4: SAMPLE SUBTITLE TEXT ---
@@ -1758,7 +1801,9 @@ class SubtitlePreviewDialog(QDialog):
         self.spn_padding.setValue(int(self.settings.get("box_padding", 6)))
         self.slider_padding.setValue(self.spn_padding.value())
 
-        self.spn_font_sz.setValue(int(self.settings.get("font_size", 32)))
+        font_sz_init = int(self.settings.get("font_size", 46))
+        self.spn_font_sz.setValue(font_sz_init)
+        self.slider_font_sz.setValue(font_sz_init)
 
         font_name = self.settings.get("font_name", "Arial")
         idx_font = self.cbo_font_name.findText(font_name)
@@ -1941,6 +1986,21 @@ class SubtitlePreviewDialog(QDialog):
         self.slider_padding.setValue(val)
         self.slider_padding.blockSignals(False)
         self.refresh_canvas()
+
+    def on_font_slider_changed(self, val: int):
+        self.spn_font_sz.blockSignals(True)
+        self.spn_font_sz.setValue(val)
+        self.spn_font_sz.blockSignals(False)
+        self.refresh_canvas()
+
+    def on_font_spin_changed(self, val: int):
+        self.slider_font_sz.blockSignals(True)
+        self.slider_font_sz.setValue(val)
+        self.slider_font_sz.blockSignals(False)
+        self.refresh_canvas()
+
+    def set_quick_font_size(self, sz: int):
+        self.spn_font_sz.setValue(sz)
 
     def on_style_preset_changed(self, text: str):
         if "TikTok Black Box" in text:
@@ -2326,29 +2386,47 @@ class MainWindow(QMainWindow):
         right_col = QVBoxLayout()
         right_col.setSpacing(10)
 
-        # Group ④ Dubbing
-        grp_tts = QGroupBox("④ Dubbing")
+        # Group ④ Voice Dubbing / Audio Translation
+        grp_tts = QGroupBox("④ Voice Dubbing & Audio Translation")
         layout_tts = QGridLayout(grp_tts)
         layout_tts.setContentsMargins(18, 14, 18, 14)
-        layout_tts.setVerticalSpacing(12)
+        layout_tts.setVerticalSpacing(10)
         layout_tts.setHorizontalSpacing(14)
         layout_tts.setColumnStretch(0, 0)
         layout_tts.setColumnStretch(1, 1)
         layout_tts.setColumnMinimumWidth(0, 110)
 
-        layout_tts.addWidget(QLabel("Voice:"), 0, 0)
+        # Row 0: On/Off Audio Dubbing Checkbox
+        h_dub_enable = QHBoxLayout()
+        h_dub_enable.setSpacing(12)
+        self.chk_enable_dubbing = QCheckBox("Enable AI Voice Dubbing (Lồng tiếng AI)")
+        self.chk_enable_dubbing.setChecked(True)
+        self.chk_enable_dubbing.setStyleSheet("font-weight: bold; font-size: 13px; color: #1E293B;")
+        self.chk_enable_dubbing.toggled.connect(self.on_toggle_dubbing)
+        h_dub_enable.addWidget(self.chk_enable_dubbing)
+
+        self.lbl_dub_hint = QLabel("(Uncheck to preserve original audio & burn subtitles only)")
+        self.lbl_dub_hint.setStyleSheet("color: #64748B; font-size: 11px;")
+        h_dub_enable.addWidget(self.lbl_dub_hint)
+        h_dub_enable.addStretch()
+        layout_tts.addLayout(h_dub_enable, 0, 0, 1, 2)
+
+        # Row 1: Voice
+        self.lbl_voice = QLabel("Voice:")
+        layout_tts.addWidget(self.lbl_voice, 1, 0)
         self.cbo_voice = QComboBox()
         self.cbo_voice.setFixedHeight(32)
         for label, voice_key in Config.AVAILABLE_VOICES.items():
             self.cbo_voice.addItem(label, voice_key)
-        layout_tts.addWidget(self.cbo_voice, 0, 1)
+        layout_tts.addWidget(self.cbo_voice, 1, 1)
 
-        # Gom 2 input number (Ducking & Delay) vào 1 hàng ngang với nhãn gọn
-        layout_tts.addWidget(QLabel("Volume & Delay:"), 1, 0)
+        # Row 2: Volume & Delay
+        self.lbl_vol_delay = QLabel("Volume & Delay:")
+        layout_tts.addWidget(self.lbl_vol_delay, 2, 0)
         h_tuning = QHBoxLayout()
         h_tuning.setSpacing(10)
 
-        lbl_ducking = QLabel("Ducking:")
+        self.lbl_ducking = QLabel("Ducking:")
         self.spn_ducking = QDoubleSpinBox()
         self.spn_ducking.setFixedHeight(32)
         self.spn_ducking.setFixedWidth(85)
@@ -2356,22 +2434,24 @@ class MainWindow(QMainWindow):
         self.spn_ducking.setSingleStep(0.02)
         self.spn_ducking.setValue(Config.DEFAULT_DUCKING_VOLUME)
 
-        lbl_delay = QLabel("Delay:")
-        lbl_delay.setFixedWidth(40)
+        self.lbl_delay = QLabel("Delay:")
+        self.lbl_delay.setFixedWidth(40)
         self.spn_delay = QDoubleSpinBox()
         self.spn_delay.setFixedHeight(32)
         self.spn_delay.setFixedWidth(85)
         self.spn_delay.setRange(-2.0, 5.0)
         self.spn_delay.setValue(0.0)
 
-        h_tuning.addWidget(lbl_ducking)
+        h_tuning.addWidget(self.lbl_ducking)
         h_tuning.addWidget(self.spn_ducking)
-        h_tuning.addWidget(lbl_delay)
+        h_tuning.addWidget(self.lbl_delay)
         h_tuning.addWidget(self.spn_delay)
         h_tuning.addStretch()
-        layout_tts.addLayout(h_tuning, 1, 1)
+        layout_tts.addLayout(h_tuning, 2, 1)
 
-        layout_tts.addWidget(QLabel("Voice Cloning:"), 2, 0)
+        # Row 3: Voice Cloning
+        self.lbl_clone = QLabel("Voice Cloning:")
+        layout_tts.addWidget(self.lbl_clone, 3, 0)
         h_clone = QHBoxLayout()
         h_clone.setSpacing(6)
         self.txt_clone = QLineEdit()
@@ -2382,7 +2462,7 @@ class MainWindow(QMainWindow):
         self.btn_browse_clone.setStyleSheet("background-color: #F8FAFC; color: #0F172A; font-size: 14px; border: 1px solid #CBD5E1; border-radius: 6px;")
         h_clone.addWidget(self.txt_clone)
         h_clone.addWidget(self.btn_browse_clone)
-        layout_tts.addLayout(h_clone, 2, 1)
+        layout_tts.addLayout(h_clone, 3, 1)
         right_col.addWidget(grp_tts)
 
         # Group ⑤ Export
@@ -2418,8 +2498,8 @@ class MainWindow(QMainWindow):
         self.spn_font_size = QSpinBox()
         self.spn_font_size.setFixedHeight(30)
         self.spn_font_size.setFixedWidth(80)
-        self.spn_font_size.setRange(10, 100)
-        self.spn_font_size.setValue(32)
+        self.spn_font_size.setRange(12, 120)
+        self.spn_font_size.setValue(46)
         h_font.addWidget(self.cbo_font)
         h_font.addWidget(lbl_size)
         h_font.addWidget(self.spn_font_size)
@@ -3488,6 +3568,27 @@ class MainWindow(QMainWindow):
             self.cbo_sub_pos.setCurrentText("Custom...")
             self.cbo_sub_pos.blockSignals(False)
 
+    @Slot(bool)
+    def on_toggle_dubbing(self, enabled: bool):
+        """Bật/tắt chế độ lồng tiếng AI: khi tắt thì giữ trọn vẹn 100% âm thanh gốc của video."""
+        self.cbo_voice.setEnabled(enabled)
+        self.spn_ducking.setEnabled(enabled)
+        self.spn_delay.setEnabled(enabled)
+        self.txt_clone.setEnabled(enabled)
+        self.btn_browse_clone.setEnabled(enabled)
+        self.lbl_voice.setEnabled(enabled)
+        self.lbl_vol_delay.setEnabled(enabled)
+        self.lbl_clone.setEnabled(enabled)
+        self.lbl_ducking.setEnabled(enabled)
+        self.lbl_delay.setEnabled(enabled)
+
+        if enabled:
+            self.lbl_dub_hint.setText("(AI voice will replace/duck original dialogue)")
+            self.lbl_dub_hint.setStyleSheet("color: #64748B; font-size: 11px;")
+        else:
+            self.lbl_dub_hint.setText("(⚡ Preserves 100% original video audio, generates subtitles only)")
+            self.lbl_dub_hint.setStyleSheet("color: #2563EB; font-weight: 500; font-size: 11px;")
+
     def extract_sample_frame(self, video_path: Path) -> Optional[str]:
         """Trích xuất 1 khung hình mẫu nhanh (0.05s) bằng FFmpeg để hiển thị trong live preview."""
         return extract_video_frame_at(video_path, timestamp_sec=1.0)
@@ -3665,6 +3766,7 @@ class MainWindow(QMainWindow):
             "subtitle_options": subtitle_options,
             "watermark_options": watermark_options,
             "encoder": encoder_key,
+            "enable_dubbing": self.chk_enable_dubbing.isChecked(),
             "output_dir": Path(self.txt_output_dir.text()).resolve()
         }
 
