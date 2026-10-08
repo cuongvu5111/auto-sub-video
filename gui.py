@@ -10,7 +10,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 # Configure UTF-8 encoding on Windows
 if sys.platform == "win32":
@@ -20,8 +20,8 @@ if sys.platform == "win32":
     except AttributeError:
         pass
 
-from PySide6.QtCore import Qt, QThread, Signal, Slot
-from PySide6.QtGui import QFont, QColor, QPixmap, QValidator
+from PySide6.QtCore import Qt, QThread, Signal, Slot, QRectF
+from PySide6.QtGui import QFont, QColor, QPixmap, QValidator, QPainter, QFontMetrics, QPainterPath, QLinearGradient, QPen
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
@@ -297,17 +297,209 @@ class RobustSpinBox(QSpinBox):
         return (QValidator.State.Acceptable, text, pos)
 
 
+class WatermarkPreviewCanvas(QWidget):
+    """
+    Live visual canvas rendering an accurate real-time preview of Text Watermark
+    and Logo Image Watermark on a simulated or real video frame (9:16 or 16:9).
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(320, 420)
+        self.aspect_ratio: str = "9:16"
+        self.bg_pixmap: Optional[QPixmap] = None
+
+        # Text watermark state
+        self.text_enabled: bool = False
+        self.text_content: str = ""
+        self.text_position: str = "center"
+        self.text_font_size: int = 22
+
+        # Logo watermark state
+        self.logo_enabled: bool = False
+        self.logo_path: str = ""
+        self.logo_pixmap: Optional[QPixmap] = None
+        self.logo_position: str = "top-right"
+        self.logo_opacity: float = 0.8
+        self.logo_max_width: int = 160
+
+    def set_aspect_ratio(self, ratio_str: str):
+        self.aspect_ratio = ratio_str
+        self.update()
+
+    def set_background_pixmap(self, pixmap: Optional[QPixmap]):
+        self.bg_pixmap = pixmap
+        self.update()
+
+    def set_text_watermark(self, enabled: bool, text: str, pos: str, font_size: int):
+        self.text_enabled = enabled
+        self.text_content = text
+        self.text_position = pos
+        self.text_font_size = font_size
+        self.update()
+
+    def set_logo_watermark(self, enabled: bool, logo_path: str, pos: str, opacity: float, max_width: int):
+        self.logo_enabled = enabled
+        self.logo_position = pos
+        self.logo_opacity = opacity
+        self.logo_max_width = max_width
+
+        if logo_path != self.logo_path:
+            self.logo_path = logo_path
+            p = Path(logo_path.strip()) if logo_path else None
+            if p and p.is_file():
+                pix = QPixmap(str(p))
+                self.logo_pixmap = pix if not pix.isNull() else None
+            else:
+                self.logo_pixmap = None
+
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+
+        # 1. Fill entire widget background with subtle container tone
+        p.fillRect(self.rect(), QColor(248, 250, 252))
+
+        # 2. Compute proportional canvas area respecting selected aspect ratio
+        margin_pad = 12.0
+        avail_w = max(100.0, self.width() - margin_pad * 2)
+        avail_h = max(100.0, self.height() - margin_pad * 2)
+
+        is_vertical = (self.aspect_ratio == "9:16")
+        target_ratio = (9.0 / 16.0) if is_vertical else (16.0 / 9.0)
+        ref_w = 720.0 if is_vertical else 1280.0
+        ref_h = 1280.0 if is_vertical else 720.0
+
+        if (avail_w / avail_h) > target_ratio:
+            canvas_h = avail_h
+            canvas_w = canvas_h * target_ratio
+        else:
+            canvas_w = avail_w
+            canvas_h = canvas_w / target_ratio
+
+        canvas_x = (self.width() - canvas_w) / 2.0
+        canvas_y = (self.height() - canvas_h) / 2.0
+        canvas_rect = QRectF(canvas_x, canvas_y, canvas_w, canvas_h)
+
+        # 3. Draw video canvas background (Real frame if available, else dark cinematic gradient)
+        p.save()
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(canvas_rect, 8.0, 8.0)
+        p.setClipPath(clip_path)
+
+        if self.bg_pixmap and not self.bg_pixmap.isNull():
+            scaled_bg = self.bg_pixmap.scaled(
+                int(canvas_w), int(canvas_h),
+                Qt.KeepAspectRatioByExpanding,
+                Qt.SmoothTransformation
+            )
+            crop_x = (scaled_bg.width() - int(canvas_w)) // 2
+            crop_y = (scaled_bg.height() - int(canvas_h)) // 2
+            p.drawPixmap(int(canvas_x), int(canvas_y), scaled_bg, crop_x, crop_y, int(canvas_w), int(canvas_h))
+        else:
+            grad = QLinearGradient(canvas_rect.topLeft(), canvas_rect.bottomRight())
+            grad.setColorAt(0.0, QColor(15, 23, 42))
+            grad.setColorAt(1.0, QColor(30, 41, 59))
+            p.fillRect(canvas_rect, grad)
+
+            # Center text hint
+            p.setPen(QColor(255, 255, 255, 35))
+            p.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            ratio_label = "📱 9:16 Video Frame (TikTok / Shorts)" if is_vertical else "🖥️ 16:9 Video Frame (Landscape)"
+            p.drawText(QRectF(canvas_x, canvas_y + canvas_h * 0.44, canvas_w, 24), Qt.AlignCenter, ratio_label)
+            p.setFont(QFont("Segoe UI", 9))
+            p.setPen(QColor(148, 163, 184, 80))
+            p.drawText(QRectF(canvas_x, canvas_y + canvas_h * 0.44 + 22, canvas_w, 20), Qt.AlignCenter, f"{int(ref_w)} x {int(ref_h)}")
+
+        # 4. Render Logo Watermark (matches FFmpeg overlay filter)
+        if self.logo_enabled and self.logo_pixmap and not self.logo_pixmap.isNull():
+            scale_logo = canvas_w / ref_w
+            lw = max(16.0, float(self.logo_max_width) * scale_logo)
+            lh = lw * (float(self.logo_pixmap.height()) / float(max(1, self.logo_pixmap.width())))
+            pad_edge = 24.0 * scale_logo
+
+            pos = self.logo_position.lower()
+            if "top-left" in pos:
+                lx = canvas_rect.left() + pad_edge
+                ly = canvas_rect.top() + pad_edge
+            elif "bottom-left" in pos:
+                lx = canvas_rect.left() + pad_edge
+                ly = canvas_rect.bottom() - pad_edge - lh
+            elif "bottom-right" in pos:
+                lx = canvas_rect.right() - pad_edge - lw
+                ly = canvas_rect.bottom() - pad_edge - lh
+            elif "center" in pos:
+                lx = canvas_rect.left() + (canvas_w - lw) / 2.0
+                ly = canvas_rect.top() + (canvas_h - lh) / 2.0
+            else:  # top-right (default)
+                lx = canvas_rect.right() - pad_edge - lw
+                ly = canvas_rect.top() + pad_edge
+
+            p.setOpacity(max(0.05, min(1.0, self.logo_opacity)))
+            p.drawPixmap(QRectF(lx, ly, lw, lh), self.logo_pixmap, QRectF(self.logo_pixmap.rect()))
+            p.setOpacity(1.0)
+
+        # 5. Render Text Watermark (matches ASS subtitle WatermarkStyle)
+        if self.text_enabled and self.text_content:
+            scale_h = canvas_h / ref_h
+            font_pt = max(8, int(round(self.text_font_size * scale_h * 1.35)))
+            wm_font = QFont("Arial", font_pt, QFont.Bold)
+            p.setFont(wm_font)
+            fm = QFontMetrics(wm_font)
+
+            pad_x = 12.0 * scale_h
+            pad_y = 6.0 * scale_h
+            text_str = self.text_content.strip()
+            max_avail_tw = canvas_w - 32.0 * scale_h
+            elided_str = fm.elidedText(text_str, Qt.ElideMiddle, int(max_avail_tw))
+
+            tw = fm.horizontalAdvance(elided_str)
+            th = fm.height()
+            bw = min(canvas_w - 20.0, tw + pad_x * 2.0)
+            bh = th + pad_y * 2.0
+            bx = canvas_rect.left() + (canvas_w - bw) / 2.0
+
+            pos = self.text_position.lower()
+            if "top" in pos:
+                by = canvas_rect.top() + (45.0 * scale_h)
+            elif "bottom" in pos:
+                by = canvas_rect.bottom() - (45.0 * scale_h) - bh
+            else:  # center
+                by = canvas_rect.top() + (canvas_h - bh) / 2.0
+
+            badge_rect = QRectF(bx, by, bw, bh)
+            p.setPen(QColor(255, 255, 255, 30))
+            p.setBrush(QColor(0, 0, 0, 168))
+            p.drawRoundedRect(badge_rect, 5.0, 5.0)
+
+            p.setPen(QColor(255, 255, 255))
+            p.drawText(badge_rect, Qt.AlignCenter, elided_str)
+
+        p.restore()
+
+        # 6. Outer border around video frame
+        p.setPen(QPen(QColor(203, 213, 225), 1.5))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(canvas_rect, 8.0, 8.0)
+        p.end()
+
+
 class WatermarkConfigDialog(QDialog):
     """
     Modal dialog allowing users to configure Text Watermark and Logo Image Watermark
-    with live thumbnail preview and opacity slider.
+    with an interactive side-by-side live video frame preview.
     """
-    def __init__(self, parent=None, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, parent=None, config: Optional[Dict[str, Any]] = None, sample_frame_path: Optional[str] = None):
         super().__init__(parent)
-        self.setWindowTitle("🎨 Watermark & Branding Settings")
-        self.setFixedSize(540, 500)
+        self.setWindowTitle("🎨 Watermark & Branding Settings - Live Preview")
+        self.resize(960, 580)
+        self.setMinimumSize(880, 520)
         self.setModal(True)
         self.config = dict(config or {})
+        self.sample_frame_path = sample_frame_path
 
         self.init_ui()
         self.load_values()
@@ -322,6 +514,20 @@ class WatermarkConfigDialog(QDialog):
             QLabel {
                 color: #0F172A;
                 font-size: 12px;
+            }
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #F1F5F9;
+                color: #1E293B;
+                border-color: #94A3B8;
             }
             QLineEdit, QComboBox, QSpinBox {
                 border: 1px solid #CBD5E1;
@@ -373,41 +579,64 @@ class WatermarkConfigDialog(QDialog):
                 margin-bottom: -5px;
                 border-radius: 8px;
             }
+            QGroupBox {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 14px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 14px;
+                padding: 0 6px;
+                color: #0F172A;
+                font-weight: bold;
+                font-size: 12px;
+            }
         """)
 
     def init_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 16, 20, 16)
-        main_layout.setSpacing(14)
+        root_layout = QHBoxLayout(self)
+        root_layout.setContentsMargins(18, 16, 18, 16)
+        root_layout.setSpacing(16)
+
+        # ================= LEFT COLUMN: SETTINGS TABS =================
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
 
         header_lbl = QLabel("<b>Watermark & Branding Settings</b>")
         header_lbl.setStyleSheet("font-size: 15px; color: #0F172A;")
-        main_layout.addWidget(header_lbl)
+        left_layout.addWidget(header_lbl)
 
-        sub_desc = QLabel("Configure promotional text banner and channel logo to protect and brand your videos.")
-        sub_desc.setStyleSheet("font-size: 11px; color: #64748B; margin-bottom: 4px;")
+        sub_desc = QLabel("Configure promotional text banner and channel logo to brand your videos.")
+        sub_desc.setStyleSheet("font-size: 11px; color: #64748B; margin-bottom: 2px;")
         sub_desc.setWordWrap(True)
-        main_layout.addWidget(sub_desc)
+        left_layout.addWidget(sub_desc)
 
         self.tab_widget = QTabWidget()
 
         # TAB 1: TEXT WATERMARK
         tab_text = QWidget()
         layout_text = QVBoxLayout(tab_text)
-        layout_text.setSpacing(12)
+        layout_text.setSpacing(10)
 
         self.chk_text_enable = QCheckBox("Enable Text Watermark")
         self.chk_text_enable.setStyleSheet("font-weight: bold; font-size: 13px; color: #1E293B;")
+        self.chk_text_enable.toggled.connect(self.refresh_preview)
         layout_text.addWidget(self.chk_text_enable)
 
         grid_text = QGridLayout()
         grid_text.setVerticalSpacing(10)
-        grid_text.setHorizontalSpacing(12)
+        grid_text.setHorizontalSpacing(10)
 
         grid_text.addWidget(QLabel("Watermark Text:"), 0, 0)
         self.txt_text_content = QLineEdit()
         self.txt_text_content.setFixedHeight(32)
         self.txt_text_content.setPlaceholderText("e.g. Bạn đang xem video được sub bởi Vũ Mạnh Cường")
+        self.txt_text_content.textChanged.connect(self.refresh_preview)
         grid_text.addWidget(self.txt_text_content, 0, 1)
 
         grid_text.addWidget(QLabel("Timing:"), 1, 0)
@@ -423,6 +652,7 @@ class WatermarkConfigDialog(QDialog):
         self.cbo_text_pos.addItem("Center (Chính giữa màn hình)", "center")
         self.cbo_text_pos.addItem("Top (Phía trên)", "top")
         self.cbo_text_pos.addItem("Bottom (Phía dưới)", "bottom")
+        self.cbo_text_pos.currentIndexChanged.connect(self.refresh_preview)
         grid_text.addWidget(self.cbo_text_pos, 2, 1)
 
         grid_text.addWidget(QLabel("Font Size:"), 3, 0)
@@ -430,12 +660,13 @@ class WatermarkConfigDialog(QDialog):
         self.spn_text_font_size.setFixedHeight(32)
         self.spn_text_font_size.setRange(10, 120)
         self.spn_text_font_size.setValue(22)
+        self.spn_text_font_size.valueChanged.connect(self.refresh_preview)
         grid_text.addWidget(self.spn_text_font_size, 3, 1)
 
         layout_text.addLayout(grid_text)
 
-        tip_lbl = QLabel("💡 <i>Text watermark is rendered with a sleek semi-transparent badge for optimal readability on all video backgrounds.</i>")
-        tip_lbl.setStyleSheet("font-size: 11px; color: #64748B; margin-top: 6px;")
+        tip_lbl = QLabel("💡 <i>Text watermark is rendered with a sleek semi-transparent badge for optimal readability on all backgrounds.</i>")
+        tip_lbl.setStyleSheet("font-size: 11px; color: #64748B; margin-top: 4px;")
         tip_lbl.setWordWrap(True)
         layout_text.addWidget(tip_lbl)
         layout_text.addStretch()
@@ -445,15 +676,16 @@ class WatermarkConfigDialog(QDialog):
         # TAB 2: LOGO IMAGE WATERMARK
         tab_logo = QWidget()
         layout_logo = QVBoxLayout(tab_logo)
-        layout_logo.setSpacing(12)
+        layout_logo.setSpacing(10)
 
         self.chk_logo_enable = QCheckBox("Enable Logo Watermark")
         self.chk_logo_enable.setStyleSheet("font-weight: bold; font-size: 13px; color: #1E293B;")
+        self.chk_logo_enable.toggled.connect(self.refresh_preview)
         layout_logo.addWidget(self.chk_logo_enable)
 
         grid_logo = QGridLayout()
         grid_logo.setVerticalSpacing(10)
-        grid_logo.setHorizontalSpacing(12)
+        grid_logo.setHorizontalSpacing(10)
 
         grid_logo.addWidget(QLabel("Logo Image:"), 0, 0)
         h_file = QHBoxLayout()
@@ -461,25 +693,18 @@ class WatermarkConfigDialog(QDialog):
         self.txt_logo_path = QLineEdit()
         self.txt_logo_path.setFixedHeight(32)
         self.txt_logo_path.setPlaceholderText("Select PNG / JPG image...")
-        self.txt_logo_path.textChanged.connect(self.update_logo_preview)
+        self.txt_logo_path.textChanged.connect(self.refresh_preview)
 
         self.btn_browse_logo = QPushButton("Browse...")
         self.btn_browse_logo.setFixedHeight(32)
-        self.btn_browse_logo.setFixedWidth(80)
+        self.btn_browse_logo.setFixedWidth(75)
         self.btn_browse_logo.setStyleSheet("background-color: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px; font-weight: 500;")
         self.btn_browse_logo.clicked.connect(self.action_browse_logo)
         h_file.addWidget(self.txt_logo_path)
         h_file.addWidget(self.btn_browse_logo)
         grid_logo.addLayout(h_file, 0, 1)
 
-        grid_logo.addWidget(QLabel("Preview:"), 1, 0)
-        self.lbl_logo_preview = QLabel("No image selected")
-        self.lbl_logo_preview.setFixedHeight(54)
-        self.lbl_logo_preview.setAlignment(Qt.AlignCenter)
-        self.lbl_logo_preview.setStyleSheet("border: 1px dashed #CBD5E1; border-radius: 6px; background-color: #F8FAFC; color: #94A3B8; font-size: 11px;")
-        grid_logo.addWidget(self.lbl_logo_preview, 1, 1)
-
-        grid_logo.addWidget(QLabel("Position:"), 2, 0)
+        grid_logo.addWidget(QLabel("Position:"), 1, 0)
         self.cbo_logo_pos = QComboBox()
         self.cbo_logo_pos.setFixedHeight(32)
         self.cbo_logo_pos.addItem("Top-Right (Standard for short video)", "top-right")
@@ -487,35 +712,38 @@ class WatermarkConfigDialog(QDialog):
         self.cbo_logo_pos.addItem("Bottom-Right", "bottom-right")
         self.cbo_logo_pos.addItem("Bottom-Left", "bottom-left")
         self.cbo_logo_pos.addItem("Center", "center")
-        grid_logo.addWidget(self.cbo_logo_pos, 2, 1)
+        self.cbo_logo_pos.currentIndexChanged.connect(self.refresh_preview)
+        grid_logo.addWidget(self.cbo_logo_pos, 1, 1)
 
-        grid_logo.addWidget(QLabel("Opacity:"), 3, 0)
+        grid_logo.addWidget(QLabel("Opacity:"), 2, 0)
         h_op = QHBoxLayout()
-        h_op.setSpacing(10)
+        h_op.setSpacing(8)
         self.slider_opacity = QSlider(Qt.Horizontal)
         self.slider_opacity.setRange(10, 100)
         self.slider_opacity.setValue(80)
         self.lbl_op_val = QLabel("80%")
-        self.lbl_op_val.setFixedWidth(38)
+        self.lbl_op_val.setFixedWidth(36)
         self.lbl_op_val.setStyleSheet("font-weight: bold; color: #2563EB;")
         self.slider_opacity.valueChanged.connect(lambda v: self.lbl_op_val.setText(f"{v}%"))
+        self.slider_opacity.valueChanged.connect(self.refresh_preview)
         h_op.addWidget(self.slider_opacity)
         h_op.addWidget(self.lbl_op_val)
-        grid_logo.addLayout(h_op, 3, 1)
+        grid_logo.addLayout(h_op, 2, 1)
 
-        grid_logo.addWidget(QLabel("Max Width:"), 4, 0)
+        grid_logo.addWidget(QLabel("Max Width:"), 3, 0)
         self.spn_logo_max_width = RobustSpinBox()
         self.spn_logo_max_width.setFixedHeight(32)
         self.spn_logo_max_width.setRange(10, 1920)
         self.spn_logo_max_width.setValue(160)
         self.spn_logo_max_width.setSuffix(" px")
-        grid_logo.addWidget(self.spn_logo_max_width, 4, 1)
+        self.spn_logo_max_width.valueChanged.connect(self.refresh_preview)
+        grid_logo.addWidget(self.spn_logo_max_width, 3, 1)
 
         layout_logo.addLayout(grid_logo)
         layout_logo.addStretch()
 
         self.tab_widget.addTab(tab_logo, "🖼️ Logo Image")
-        main_layout.addWidget(self.tab_widget)
+        left_layout.addWidget(self.tab_widget)
 
         # Dialog Buttons
         btn_box = QHBoxLayout()
@@ -533,7 +761,104 @@ class WatermarkConfigDialog(QDialog):
         btn_box.addStretch()
         btn_box.addWidget(self.btn_cancel)
         btn_box.addWidget(self.btn_save)
-        main_layout.addLayout(btn_box)
+        left_layout.addLayout(btn_box)
+
+        root_layout.addWidget(left_widget, stretch=5)
+
+        # ================= RIGHT COLUMN: LIVE VIDEO PREVIEW =================
+        grp_preview = QGroupBox("🎬 Live Video Preview")
+        grp_preview.setStyleSheet("""
+            QGroupBox {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                padding-top: 12px;
+            }
+        """)
+        preview_layout = QVBoxLayout(grp_preview)
+        preview_layout.setContentsMargins(12, 10, 12, 12)
+        preview_layout.setSpacing(8)
+
+        # Preview toolbar: Aspect ratio + Sample frame selector
+        h_prev_tools = QHBoxLayout()
+        h_prev_tools.setSpacing(8)
+
+        lbl_ratio = QLabel("Aspect:")
+        lbl_ratio.setStyleSheet("font-weight: 500; font-size: 11px;")
+        h_prev_tools.addWidget(lbl_ratio)
+
+        self.cbo_aspect_ratio = QComboBox()
+        self.cbo_aspect_ratio.setFixedHeight(28)
+        self.cbo_aspect_ratio.addItem("📱 9:16 (Shorts/TikTok)", "9:16")
+        self.cbo_aspect_ratio.addItem("🖥️ 16:9 (Landscape)", "16:9")
+        self.cbo_aspect_ratio.currentIndexChanged.connect(self.refresh_preview)
+        h_prev_tools.addWidget(self.cbo_aspect_ratio)
+
+        self.btn_choose_frame = QPushButton("🖼️ Sample Frame...")
+        self.btn_choose_frame.setFixedHeight(28)
+        self.btn_choose_frame.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 5px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #EFF6FF;
+                color: #1D4ED8;
+                border-color: #93C5FD;
+            }
+        """)
+        self.btn_choose_frame.clicked.connect(self.action_choose_sample_frame)
+        h_prev_tools.addWidget(self.btn_choose_frame)
+
+        preview_layout.addLayout(h_prev_tools)
+
+        # Visual Canvas
+        self.preview_canvas = WatermarkPreviewCanvas()
+        preview_layout.addWidget(self.preview_canvas, stretch=1)
+
+        tip_prev = QLabel("💡 <i>Live preview renders real-time positions, scaling, and opacity.</i>")
+        tip_prev.setStyleSheet("font-size: 11px; color: #64748B;")
+        tip_prev.setAlignment(Qt.AlignCenter)
+        preview_layout.addWidget(tip_prev)
+
+        root_layout.addWidget(grp_preview, stretch=6)
+
+    def refresh_preview(self):
+        """Update live preview canvas based on current widget settings."""
+        text_en = self.chk_text_enable.isChecked()
+        text_val = self.txt_text_content.text().strip()
+        text_pos = self.cbo_text_pos.currentData() or "center"
+        font_sz = self.spn_text_font_size.value()
+
+        logo_en = self.chk_logo_enable.isChecked()
+        logo_path = self.txt_logo_path.text().strip()
+        logo_pos = self.cbo_logo_pos.currentData() or "top-right"
+        logo_op = self.slider_opacity.value() / 100.0
+        logo_mw = self.spn_logo_max_width.value()
+
+        aspect = self.cbo_aspect_ratio.currentData() or "9:16"
+
+        self.preview_canvas.set_aspect_ratio(aspect)
+        self.preview_canvas.set_text_watermark(text_en, text_val, text_pos, font_sz)
+        self.preview_canvas.set_logo_watermark(logo_en, logo_path, logo_pos, logo_op, logo_mw)
+
+    def action_choose_sample_frame(self):
+        """Allow user to pick any background image to test overlay positions."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Background Sample Frame",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp)"
+        )
+        if file_path:
+            pix = QPixmap(file_path)
+            if not pix.isNull():
+                self.preview_canvas.set_background_pixmap(pix)
 
     def load_values(self):
         # Text Watermark values
@@ -555,7 +880,6 @@ class WatermarkConfigDialog(QDialog):
         # Logo Watermark values
         logo_path = self.config.get("logo_path", "")
         self.txt_logo_path.setText(logo_path)
-        self.update_logo_preview(logo_path)
         has_logo_file = bool(logo_path and Path(logo_path).is_file())
         self.chk_logo_enable.setChecked(self.config.get("logo_enabled", has_logo_file))
 
@@ -570,17 +894,19 @@ class WatermarkConfigDialog(QDialog):
 
         self.spn_logo_max_width.setValue(int(self.config.get("logo_max_width", 160)))
 
-    def update_logo_preview(self, path_str: str):
-        path = Path(path_str.strip())
-        if path.is_file():
-            pix = QPixmap(str(path))
+        # Nạp khung hình mẫu nếu được truyền từ video queue
+        if self.sample_frame_path and Path(self.sample_frame_path).is_file():
+            pix = QPixmap(self.sample_frame_path)
             if not pix.isNull():
-                scaled = pix.scaled(160, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.lbl_logo_preview.setPixmap(scaled)
-                self.lbl_logo_preview.setText("")
-                return
-        self.lbl_logo_preview.setPixmap(QPixmap())
-        self.lbl_logo_preview.setText("No valid image selected")
+                self.preview_canvas.set_background_pixmap(pix)
+                # Tự động chọn aspect ratio tương ứng
+                if pix.width() > pix.height():
+                    self.cbo_aspect_ratio.setCurrentIndex(1)  # 16:9
+                else:
+                    self.cbo_aspect_ratio.setCurrentIndex(0)  # 9:16
+
+        # Cập nhật khung preview ngay khi mở hộp thoại
+        self.refresh_preview()
 
     def action_browse_logo(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -592,6 +918,7 @@ class WatermarkConfigDialog(QDialog):
         if file_path:
             self.txt_logo_path.setText(file_path)
             self.chk_logo_enable.setChecked(True)
+            self.refresh_preview()
 
     def action_save(self):
         # Đảm bảo bóc tách giá trị mới nhất trong ô nhập kể cả khi vừa gõ xong chưa bấm Enter
@@ -612,6 +939,1093 @@ class WatermarkConfigDialog(QDialog):
         self.config["logo_opacity"] = self.slider_opacity.value() / 100.0
         self.config["logo_max_width"] = self.spn_logo_max_width.value()
 
+        self.accept()
+
+
+def extract_video_frame_at(video_path: Union[str, Path], timestamp_sec: float = 1.0) -> Optional[str]:
+    """
+    Trích xuất nhanh một khung hình từ video tại mốc thời gian timestamp_sec bằng FFmpeg.
+    Lưu vào thư mục temp/ để phục vụ preview subtitle và watermark.
+    """
+    try:
+        vp = Path(video_path).resolve()
+        if not vp.is_file():
+            return None
+        Config.TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        safe_sec = max(0.0, float(timestamp_sec))
+        thumb_name = f"{vp.stem}_frame_{int(safe_sec * 100):06d}.jpg"
+        thumb_path = Config.TEMP_DIR / thumb_name
+        if thumb_path.is_file() and thumb_path.stat().st_size > 0:
+            return str(thumb_path)
+
+        from core.audio_extractor import find_ffmpeg
+        ffmpeg_bin = find_ffmpeg()
+        cmd = [
+            str(ffmpeg_bin), "-y",
+            "-ss", f"{safe_sec:.2f}",
+            "-i", str(vp),
+            "-vframes", "1",
+            "-q:v", "2",
+            str(thumb_path)
+        ]
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, timeout=5)
+        if thumb_path.is_file() and thumb_path.stat().st_size > 0:
+            return str(thumb_path)
+    except Exception:
+        pass
+    return None
+
+
+def get_video_meta(video_path: Union[str, Path]) -> Dict[str, Any]:
+    """
+    Lấy thông tin duration, kích thước width x height và aspect ratio của video
+    sử dụng PyAV hoặc fallback nhẹ.
+    """
+    meta = {"duration": 15.0, "width": 720, "height": 1280, "aspect_ratio": "9:16"}
+    try:
+        import av
+        with av.open(str(video_path)) as container:
+            if container.duration:
+                meta["duration"] = max(1.0, float(container.duration / av.time_base))
+            if container.streams.video:
+                v = container.streams.video[0]
+                if v.width and v.height:
+                    meta["width"] = v.width
+                    meta["height"] = v.height
+                    meta["aspect_ratio"] = "16:9" if v.width > v.height else "9:16"
+            return meta
+    except Exception:
+        pass
+    return meta
+
+
+class SubtitlePreviewCanvas(QWidget):
+    """
+    Visual canvas rendering an accurate real-time preview of Subtitle placement,
+    font size, and hardsub background cover box (ASS BorderStyle 3 & 1) on actual video frames.
+    Supports interactive mouse dragging to adjust Margin V intuitively.
+    """
+    margin_v_changed = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(320, 440)
+        self.setMouseTracking(True)
+
+        self.aspect_ratio: str = "9:16"
+        self.bg_pixmap: Optional[QPixmap] = None
+
+        # Subtitle styling attributes
+        self.sub_text: str = "Phụ đề tiếng Việt mẫu che sub cũ"
+        self.alignment: int = 2  # 2: Bottom-center, 8: Top-center
+        self.margin_v: int = 40  # pixels from bottom/top
+        self.font_name: str = "Arial"
+        self.font_size: int = 32
+        self.border_style: int = 3  # 3: Opaque Box, 1: Outline
+        self.box_padding: int = 6
+        self.text_color: str = "#FFE600"  # Yellow default for TikTok
+        self.bg_color: str = "#000000"    # Black solid box
+        self.outline_width: int = 3
+        self.shadow_width: int = 1
+
+        # Interactive dragging state
+        self.current_box_rect: QRectF = QRectF()
+        self.is_dragging: bool = False
+        self.drag_start_y: float = 0.0
+        self.drag_start_margin_v: int = 40
+        self.is_hovering_box: bool = False
+
+    def set_aspect_ratio(self, ratio_str: str):
+        self.aspect_ratio = ratio_str
+        self.update()
+
+    def set_background_pixmap(self, pixmap: Optional[QPixmap]):
+        self.bg_pixmap = pixmap
+        self.update()
+
+    def set_subtitle_config(
+        self,
+        sub_text: str,
+        alignment: int,
+        margin_v: int,
+        font_name: str,
+        font_size: int,
+        border_style: int,
+        box_padding: int,
+        text_color: str,
+        bg_color: str
+    ):
+        self.sub_text = sub_text
+        self.alignment = alignment
+        self.margin_v = margin_v
+        self.font_name = font_name
+        self.font_size = font_size
+        self.border_style = border_style
+        self.box_padding = box_padding
+        self.text_color = text_color
+        self.bg_color = bg_color
+        self.update()
+
+    def set_margin_v(self, val: int):
+        self.margin_v = max(0, min(600, val))
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.TextAntialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+
+        # 1. Fill entire widget background with clean surface tone
+        p.fillRect(self.rect(), QColor(248, 250, 252))
+
+        # 2. Compute proportional canvas area respecting aspect ratio
+        margin_pad = 12.0
+        avail_w = max(100.0, self.width() - margin_pad * 2)
+        avail_h = max(100.0, self.height() - margin_pad * 2)
+
+        is_vertical = (self.aspect_ratio == "9:16")
+        target_ratio = (9.0 / 16.0) if is_vertical else (16.0 / 9.0)
+        ref_w = 720.0 if is_vertical else 1280.0
+        ref_h = 1280.0 if is_vertical else 720.0
+
+        if (avail_w / avail_h) > target_ratio:
+            canvas_h = avail_h
+            canvas_w = canvas_h * target_ratio
+        else:
+            canvas_w = avail_w
+            canvas_h = canvas_w / target_ratio
+
+        canvas_x = (self.width() - canvas_w) / 2.0
+        canvas_y = (self.height() - canvas_h) / 2.0
+        canvas_rect = QRectF(canvas_x, canvas_y, canvas_w, canvas_h)
+
+        # 3. Clip and draw video background
+        p.save()
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(canvas_rect, 8.0, 8.0)
+        p.setClipPath(clip_path)
+
+        if self.bg_pixmap and not self.bg_pixmap.isNull():
+            scaled_bg = self.bg_pixmap.scaled(
+                int(canvas_w), int(canvas_h),
+                Qt.KeepAspectRatioByExpanding,
+                Qt.SmoothTransformation
+            )
+            crop_x = (scaled_bg.width() - int(canvas_w)) // 2
+            crop_y = (scaled_bg.height() - int(canvas_h)) // 2
+            p.drawPixmap(int(canvas_x), int(canvas_y), scaled_bg, crop_x, crop_y, int(canvas_w), int(canvas_h))
+        else:
+            grad = QLinearGradient(canvas_rect.topLeft(), canvas_rect.bottomRight())
+            grad.setColorAt(0.0, QColor(15, 23, 42))
+            grad.setColorAt(1.0, QColor(30, 41, 59))
+            p.fillRect(canvas_rect, grad)
+
+            # Center text hint
+            p.setPen(QColor(255, 255, 255, 45))
+            p.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            ratio_label = "📱 9:16 Vertical Video" if is_vertical else "🖥️ 16:9 Landscape Video"
+            p.drawText(QRectF(canvas_x, canvas_y + canvas_h * 0.42, canvas_w, 24), Qt.AlignCenter, ratio_label)
+            p.setFont(QFont("Segoe UI", 9))
+            p.setPen(QColor(148, 163, 184, 80))
+            p.drawText(QRectF(canvas_x, canvas_y + canvas_h * 0.42 + 22, canvas_w, 20), Qt.AlignCenter, f"{int(ref_w)} x {int(ref_h)}")
+
+        # 4. Render Subtitle and Hardsub Cover Box
+        scale_h = canvas_h / ref_h
+        scale_w = canvas_w / ref_w
+
+        # Font sizing proportional to video reference resolution
+        font_pt = max(8, int(round(self.font_size * scale_h * 1.32)))
+        font_fam = self.font_name if self.font_name else "Arial"
+        sub_font = QFont(font_fam, font_pt, QFont.Bold)
+        p.setFont(sub_font)
+        fm = QFontMetrics(sub_font)
+
+        raw_text = self.sub_text.strip() if self.sub_text else "Phụ đề tiếng Việt mẫu"
+        lines = [ln.strip() for ln in raw_text.split("\n") if ln.strip()]
+        if not lines:
+            lines = ["Phụ đề tiếng Việt mẫu"]
+
+        line_height = fm.height()
+        line_spacing = max(2, int(4 * scale_h))
+        total_text_h = len(lines) * line_height + (len(lines) - 1) * line_spacing
+
+        max_line_w = 0
+        for ln in lines:
+            tw = fm.horizontalAdvance(ln)
+            if tw > max_line_w:
+                max_line_w = tw
+
+        # Padding around text
+        pad_x = (self.box_padding + 10) * scale_w
+        pad_y = (self.box_padding + 4) * scale_h
+
+        bw = min(canvas_w - 24.0, max_line_w + pad_x * 2.0)
+        bh = total_text_h + pad_y * 2.0
+        bx = canvas_rect.left() + (canvas_w - bw) / 2.0
+
+        # Calculate Y based on alignment and margin_v
+        scaled_margin_v = float(self.margin_v) * scale_h
+        if self.alignment == 8:  # Top
+            by = canvas_rect.top() + scaled_margin_v
+        else:  # Bottom (default: 2)
+            by = canvas_rect.bottom() - scaled_margin_v - bh
+
+        self.current_box_rect = QRectF(bx, by, bw, bh)
+
+        # Draw Hardsub Covering Box (border_style == 3)
+        if self.border_style == 3:
+            box_col = QColor(self.bg_color) if self.bg_color else QColor(0, 0, 0)
+            p.setPen(Qt.NoPen)
+            p.setBrush(box_col)
+            # Subtle rounded corners for modern TikTok badge appearance
+            p.drawRoundedRect(self.current_box_rect, 4.0, 4.0)
+
+            # Draw text inside box
+            txt_col = QColor(self.text_color) if self.text_color else QColor(255, 230, 0)
+            p.setPen(txt_col)
+            curr_y = by + pad_y
+            for ln in lines:
+                ln_rect = QRectF(bx, curr_y, bw, line_height)
+                p.drawText(ln_rect, Qt.AlignCenter, ln)
+                curr_y += line_height + line_spacing
+        else:
+            # Traditional Outline & Shadow (border_style == 1)
+            txt_col = QColor(self.text_color) if self.text_color else QColor(255, 255, 255)
+            curr_y = by + pad_y
+            for ln in lines:
+                ln_rect = QRectF(bx, curr_y, bw, line_height)
+                # Shadow
+                p.setPen(QColor(0, 0, 0, 220))
+                p.drawText(ln_rect.translated(1.5, 1.5), Qt.AlignCenter, ln)
+                # Main text
+                p.setPen(txt_col)
+                p.drawText(ln_rect, Qt.AlignCenter, ln)
+                curr_y += line_height + line_spacing
+
+        # 5. Visual Guide Lines (Dashed line and Margin V indicator)
+        if self.is_hovering_box or self.is_dragging:
+            guide_pen = QPen(QColor(56, 189, 248), 1.5, Qt.DashLine)
+            p.setPen(guide_pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(self.current_box_rect.adjusted(-2, -2, 2, 2), 5.0, 5.0)
+
+            # Vertical guide line to edge
+            p.setPen(QPen(QColor(56, 189, 248, 180), 1.2, Qt.DashLine))
+            center_x = bx + bw / 2.0
+            if self.alignment == 8:
+                p.drawLine(center_x, canvas_rect.top(), center_x, by)
+            else:
+                p.drawLine(center_x, by + bh, center_x, canvas_rect.bottom())
+
+            # Margin V Badge
+            badge_txt = f"Margin V: {self.margin_v}px"
+            p.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            badge_fm = QFontMetrics(p.font())
+            bg_w = badge_fm.horizontalAdvance(badge_txt) + 12
+            bg_h = 20
+
+            badge_y = (by + bh + 6) if (self.alignment != 8 and by + bh + 26 < canvas_rect.bottom()) else (by - 24)
+            badge_rect = QRectF(center_x - bg_w / 2.0, badge_y, bg_w, bg_h)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(15, 23, 42, 230))
+            p.drawRoundedRect(badge_rect, 4.0, 4.0)
+            p.setPen(QColor(56, 189, 248))
+            p.drawText(badge_rect, Qt.AlignCenter, badge_txt)
+
+        p.restore()
+
+        # 6. Outer border around video frame
+        p.setPen(QPen(QColor(203, 213, 225), 1.5))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(canvas_rect, 8.0, 8.0)
+        p.end()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = event.position()
+            # Allow click within or near the box
+            if self.current_box_rect.adjusted(-12, -12, 12, 12).contains(pos):
+                self.is_dragging = True
+                self.drag_start_y = pos.y()
+                self.drag_start_margin_v = self.margin_v
+                self.setCursor(Qt.ClosedHandCursor)
+                self.update()
+
+    def mouseMoveEvent(self, event):
+        pos = event.position()
+        if self.is_dragging:
+            delta_y = pos.y() - self.drag_start_y
+            is_vertical = (self.aspect_ratio == "9:16")
+            ref_h = 1280.0 if is_vertical else 720.0
+            margin_pad = 12.0
+            avail_h = max(100.0, self.height() - margin_pad * 2)
+            target_ratio = (9.0 / 16.0) if is_vertical else (16.0 / 9.0)
+            avail_w = max(100.0, self.width() - margin_pad * 2)
+
+            if (avail_w / avail_h) > target_ratio:
+                canvas_h = avail_h
+            else:
+                canvas_h = avail_w / target_ratio
+
+            scale_h = max(0.001, canvas_h / ref_h)
+
+            if self.alignment == 8:  # Top
+                delta_m = int(round(delta_y / scale_h))
+            else:  # Bottom
+                delta_m = - int(round(delta_y / scale_h))
+
+            new_margin = max(0, min(600, self.drag_start_margin_v + delta_m))
+            if new_margin != self.margin_v:
+                self.margin_v = new_margin
+                self.margin_v_changed.emit(self.margin_v)
+                self.update()
+        else:
+            near_box = self.current_box_rect.adjusted(-12, -12, 12, 12).contains(pos)
+            if near_box != self.is_hovering_box:
+                self.is_hovering_box = near_box
+                self.setCursor(Qt.SizeVerCursor if near_box else Qt.ArrowCursor)
+                self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.is_dragging:
+            self.is_dragging = False
+            self.setCursor(Qt.ArrowCursor)
+            self.update()
+
+
+class SubtitlePreviewDialog(QDialog):
+    """
+    Modal dialog allowing users to preview subtitle placement, font size, and background cover
+    on real video frames to accurately cover old hardcoded subtitles (Chinese, English, etc.).
+    """
+    def __init__(
+        self,
+        parent=None,
+        video_paths: Optional[List[str]] = None,
+        current_settings: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("🎯 Subtitle Overlay & Hardsub Cover Preview - AutoDub")
+        self.resize(1020, 640)
+        self.setMinimumSize(920, 560)
+        self.setModal(True)
+
+        self.video_paths = [str(p) for p in (video_paths or []) if Path(p).is_file()]
+        self.current_video_path = self.video_paths[0] if self.video_paths else None
+        self.video_duration = 15.0
+        self.video_aspect = "9:16"
+
+        self.settings = dict(current_settings or {})
+        self.result_settings = dict(self.settings)
+
+        self.init_ui()
+        self.load_initial_video_and_settings()
+        self.apply_dialog_styles()
+
+    def apply_dialog_styles(self):
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F8FAFC;
+                color: #0F172A;
+            }
+            QLabel {
+                color: #0F172A;
+                font-size: 12px;
+            }
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #F1F5F9;
+                color: #1E293B;
+                border-color: #94A3B8;
+            }
+            QLineEdit, QComboBox, QSpinBox {
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 4px 8px;
+                background-color: #FFFFFF;
+                color: #0F172A;
+                font-size: 12px;
+            }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+                border: 1px solid #2563EB;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #E2E8F0;
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #2563EB;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #1D4ED8;
+                border: 2px solid #FFFFFF;
+                width: 16px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 8px;
+            }
+            QGroupBox {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 14px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 14px;
+                padding: 0 6px;
+                color: #0F172A;
+                font-weight: bold;
+                font-size: 12px;
+            }
+        """)
+
+    def init_ui(self):
+        root_layout = QHBoxLayout(self)
+        root_layout.setContentsMargins(16, 14, 16, 14)
+        root_layout.setSpacing(16)
+
+        # ================= LEFT COLUMN: CONTROLS & FINE TUNING =================
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(10)
+
+        header_lbl = QLabel("<b>Subtitle Placement & Hardsub Cover</b>")
+        header_lbl.setStyleSheet("font-size: 15px; color: #0F172A;")
+        left_layout.addWidget(header_lbl)
+
+        desc_lbl = QLabel("Align subtitle position and black cover box to perfectly overlay original hardsubs.")
+        desc_lbl.setStyleSheet("font-size: 11px; color: #64748B;")
+        desc_lbl.setWordWrap(True)
+        left_layout.addWidget(desc_lbl)
+
+        # --- GROUP 1: VIDEO SOURCE & FRAME TIMELINE SCRUBBER ---
+        grp_timeline = QGroupBox("🎞️ Video & Frame Timeline")
+        tl_layout = QVBoxLayout(grp_timeline)
+        tl_layout.setContentsMargins(14, 12, 14, 12)
+        tl_layout.setSpacing(8)
+
+        # Video selector row
+        h_vid = QHBoxLayout()
+        h_vid.setSpacing(8)
+        self.cbo_video = QComboBox()
+        self.cbo_video.setFixedHeight(30)
+        if self.video_paths:
+            for p in self.video_paths:
+                self.cbo_video.addItem(f"📹 {Path(p).name}", p)
+        else:
+            self.cbo_video.addItem("No video in queue (Simulated Canvas)", "")
+        self.cbo_video.currentIndexChanged.connect(self.on_video_selection_changed)
+        h_vid.addWidget(self.cbo_video, stretch=1)
+
+        self.btn_open_custom_video = QPushButton("📂 Browse...")
+        self.btn_open_custom_video.setFixedHeight(30)
+        self.btn_open_custom_video.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #EFF6FF;
+                color: #1D4ED8;
+                border-color: #93C5FD;
+            }
+        """)
+        self.btn_open_custom_video.clicked.connect(self.action_browse_custom_video)
+        h_vid.addWidget(self.btn_open_custom_video)
+        tl_layout.addLayout(h_vid)
+
+        # Frame scrubber slider row
+        h_scrub = QHBoxLayout()
+        self.slider_timeline = QSlider(Qt.Horizontal)
+        self.slider_timeline.setRange(0, 150)  # 0.1s steps
+        self.slider_timeline.setValue(10)      # 1.0s
+        self.slider_timeline.valueChanged.connect(self.on_timeline_slider_changed)
+        h_scrub.addWidget(self.slider_timeline, stretch=1)
+
+        self.lbl_time_pos = QLabel("00:01.0 / 00:15.0")
+        self.lbl_time_pos.setStyleSheet("font-family: Consolas, monospace; font-size: 11px; font-weight: bold; color: #0F172A;")
+        h_scrub.addWidget(self.lbl_time_pos)
+        tl_layout.addLayout(h_scrub)
+
+        # Quick seek buttons
+        h_seek_btns = QHBoxLayout()
+        h_seek_btns.setSpacing(6)
+        seek_btn_qss = """
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 5px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 2px 4px;
+            }
+            QPushButton:hover {
+                background-color: #EFF6FF;
+                color: #1D4ED8;
+                border-color: #93C5FD;
+            }
+            QPushButton:pressed {
+                background-color: #DBEAFE;
+                color: #1E40AF;
+            }
+        """
+        for label, delta in [("⏮ -5s", -5.0), ("◀ -1s", -1.0), ("+1s ▶", 1.0), ("+5s ⏭", 5.0)]:
+            btn = QPushButton(label)
+            btn.setFixedHeight(26)
+            btn.setStyleSheet(seek_btn_qss)
+            btn.clicked.connect(lambda checked, d=delta: self.seek_relative(d))
+            h_seek_btns.addWidget(btn)
+        tl_layout.addLayout(h_seek_btns)
+        left_layout.addWidget(grp_timeline)
+
+        # --- GROUP 2: PLACEMENT & MARGIN V ---
+        grp_pos = QGroupBox("📍 Placement & Vertical Offset (Margin V)")
+        pos_layout = QGridLayout(grp_pos)
+        pos_layout.setContentsMargins(14, 12, 14, 12)
+        pos_layout.setVerticalSpacing(10)
+        pos_layout.setHorizontalSpacing(10)
+
+        pos_layout.addWidget(QLabel("Preset Position:"), 0, 0)
+        self.cbo_preset_pos = QComboBox()
+        self.cbo_preset_pos.setFixedHeight(30)
+        self.cbo_preset_pos.addItems([
+            "Bottom Standard (40px)",
+            "Cover Low Sub (120px)",
+            "Cover Mid Sub (220px)",
+            "Top Header (50px)",
+            "Custom..."
+        ])
+        self.cbo_preset_pos.currentTextChanged.connect(self.on_preset_pos_changed)
+        pos_layout.addWidget(self.cbo_preset_pos, 0, 1)
+
+        pos_layout.addWidget(QLabel("Margin V (Offset):"), 1, 0)
+        h_margin = QHBoxLayout()
+        self.slider_margin_v = QSlider(Qt.Horizontal)
+        self.slider_margin_v.setRange(0, 600)
+        self.slider_margin_v.setValue(40)
+        self.slider_margin_v.valueChanged.connect(self.on_margin_slider_changed)
+        h_margin.addWidget(self.slider_margin_v, stretch=1)
+
+        self.spn_margin_v = QSpinBox()
+        self.spn_margin_v.setRange(0, 600)
+        self.spn_margin_v.setValue(40)
+        self.spn_margin_v.setSuffix(" px")
+        self.spn_margin_v.setFixedWidth(82)
+        self.spn_margin_v.setFixedHeight(30)
+        self.spn_margin_v.valueChanged.connect(self.on_margin_spin_changed)
+        h_margin.addWidget(self.spn_margin_v)
+        pos_layout.addLayout(h_margin, 1, 1)
+
+        pos_layout.addWidget(QLabel("Alignment:"), 2, 0)
+        self.cbo_align = QComboBox()
+        self.cbo_align.setFixedHeight(30)
+        self.cbo_align.addItem("Bottom-Center (Standard)", 2)
+        self.cbo_align.addItem("Top-Center (Header)", 8)
+        self.cbo_align.currentIndexChanged.connect(self.refresh_canvas)
+        pos_layout.addWidget(self.cbo_align, 2, 1)
+        left_layout.addWidget(grp_pos)
+
+        # --- GROUP 3: HARDSUB COVER & STYLING ---
+        grp_style = QGroupBox("🎨 Subtitle Style & Hardsub Cover Box")
+        style_layout = QGridLayout(grp_style)
+        style_layout.setContentsMargins(14, 12, 14, 12)
+        style_layout.setVerticalSpacing(10)
+        style_layout.setHorizontalSpacing(10)
+
+        style_layout.addWidget(QLabel("Box / Style Preset:"), 0, 0)
+        self.cbo_style_preset = QComboBox()
+        self.cbo_style_preset.setFixedHeight(30)
+        self.cbo_style_preset.addItems([
+            "TikTok Black Box (Yellow Text) [Che Sub Chuẩn]",
+            "White Box (Black Text)",
+            "Black Box (White Text)",
+            "Yellow Box (Black Text)",
+            "Classic Outline (White / Shadow)",
+            "Custom..."
+        ])
+        self.cbo_style_preset.currentTextChanged.connect(self.on_style_preset_changed)
+        style_layout.addWidget(self.cbo_style_preset, 0, 1)
+
+        style_layout.addWidget(QLabel("Box Padding:"), 1, 0)
+        h_pad = QHBoxLayout()
+        self.slider_padding = QSlider(Qt.Horizontal)
+        self.slider_padding.setRange(0, 30)
+        self.slider_padding.setValue(6)
+        self.slider_padding.valueChanged.connect(self.on_padding_slider_changed)
+        h_pad.addWidget(self.slider_padding, stretch=1)
+
+        self.spn_padding = QSpinBox()
+        self.spn_padding.setRange(0, 30)
+        self.spn_padding.setValue(6)
+        self.spn_padding.setSuffix(" px")
+        self.spn_padding.setFixedWidth(78)
+        self.spn_padding.setFixedHeight(30)
+        self.spn_padding.valueChanged.connect(self.on_padding_spin_changed)
+        h_pad.addWidget(self.spn_padding)
+        style_layout.addLayout(h_pad, 1, 1)
+
+        style_layout.addWidget(QLabel("Font & Size:"), 2, 0)
+        h_font_row = QHBoxLayout()
+        self.cbo_font_name = QComboBox()
+        self.cbo_font_name.setFixedHeight(30)
+        self.cbo_font_name.addItems(["Arial", "DejaVu Sans Bold", "Montserrat", "Segoe UI"])
+        self.cbo_font_name.currentTextChanged.connect(self.refresh_canvas)
+        h_font_row.addWidget(self.cbo_font_name, stretch=1)
+
+        self.spn_font_sz = QSpinBox()
+        self.spn_font_sz.setRange(12, 72)
+        self.spn_font_sz.setValue(32)
+        self.spn_font_sz.setSuffix(" pt")
+        self.spn_font_sz.setFixedWidth(78)
+        self.spn_font_sz.setFixedHeight(30)
+        self.spn_font_sz.valueChanged.connect(self.refresh_canvas)
+        h_font_row.addWidget(self.spn_font_sz)
+        style_layout.addLayout(h_font_row, 2, 1)
+
+        style_layout.addWidget(QLabel("Colors:"), 3, 0)
+        h_colors = QHBoxLayout()
+        h_colors.setSpacing(10)
+        self.btn_text_color = QPushButton("Text Color")
+        self.btn_text_color.setFixedHeight(28)
+        self.btn_text_color.setCursor(Qt.PointingHandCursor)
+        self.btn_text_color.clicked.connect(self.action_choose_text_color)
+        h_colors.addWidget(self.btn_text_color)
+
+        self.btn_bg_color = QPushButton("Box Color")
+        self.btn_bg_color.setFixedHeight(28)
+        self.btn_bg_color.setCursor(Qt.PointingHandCursor)
+        self.btn_bg_color.clicked.connect(self.action_choose_bg_color)
+        h_colors.addWidget(self.btn_bg_color)
+        style_layout.addLayout(h_colors, 3, 1)
+        left_layout.addWidget(grp_style)
+
+        # --- GROUP 4: SAMPLE SUBTITLE TEXT ---
+        grp_sample = QGroupBox("📝 Sample Subtitle Preview Text")
+        samp_layout = QVBoxLayout(grp_sample)
+        samp_layout.setContentsMargins(14, 10, 14, 10)
+        samp_layout.setSpacing(6)
+
+        self.txt_sample_sub = QLineEdit("Phụ đề tiếng Việt mẫu để che kín sub cũ")
+        self.txt_sample_sub.setFixedHeight(30)
+        self.txt_sample_sub.textChanged.connect(self.refresh_canvas)
+        samp_layout.addWidget(self.txt_sample_sub)
+
+        self.chk_two_lines = QCheckBox("Show 2-line sample (Check box height)")
+        self.chk_two_lines.stateChanged.connect(self.on_two_lines_toggled)
+        samp_layout.addWidget(self.chk_two_lines)
+        left_layout.addWidget(grp_sample)
+
+        # Dialog Buttons
+        left_layout.addStretch()
+        h_btns = QHBoxLayout()
+        h_btns.setSpacing(10)
+
+        self.btn_cancel = QPushButton("Close")
+        self.btn_cancel.setFixedHeight(36)
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #F1F5F9;
+                color: #0F172A;
+                font-weight: 600;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 0 16px;
+            }
+            QPushButton:hover {
+                background-color: #E2E8F0;
+                color: #0F172A;
+                border-color: #94A3B8;
+            }
+        """)
+        self.btn_cancel.clicked.connect(self.reject)
+        h_btns.addWidget(self.btn_cancel)
+
+        self.btn_apply = QPushButton("✓ Apply to Project")
+        self.btn_apply.setFixedHeight(36)
+        self.btn_apply.setStyleSheet("""
+            QPushButton {
+                background-color: #2563EB;
+                color: #FFFFFF;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 0 20px;
+            }
+            QPushButton:hover {
+                background-color: #1D4ED8;
+            }
+        """)
+        self.btn_apply.clicked.connect(self.action_apply_settings)
+        h_btns.addWidget(self.btn_apply)
+        left_layout.addLayout(h_btns)
+
+        root_layout.addWidget(left_widget, stretch=5)
+
+        # ================= RIGHT COLUMN: INTERACTIVE LIVE CANVAS =================
+        grp_preview = QGroupBox("🎬 Real-Time Subtitle & Video Frame Canvas")
+        grp_preview.setStyleSheet("""
+            QGroupBox {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                padding-top: 12px;
+            }
+        """)
+        prev_layout = QVBoxLayout(grp_preview)
+        prev_layout.setContentsMargins(12, 10, 12, 12)
+        prev_layout.setSpacing(8)
+
+        # Canvas toolbar: Aspect ratio + Sample frame file
+        h_tb = QHBoxLayout()
+        h_tb.setSpacing(8)
+
+        lbl_r = QLabel("Aspect:")
+        lbl_r.setStyleSheet("font-weight: 500; font-size: 11px; color: #0F172A;")
+        h_tb.addWidget(lbl_r)
+
+        self.cbo_aspect = QComboBox()
+        self.cbo_aspect.setFixedHeight(28)
+        self.cbo_aspect.addItem("📱 9:16 (Shorts/TikTok)", "9:16")
+        self.cbo_aspect.addItem("🖥️ 16:9 (Landscape)", "16:9")
+        self.cbo_aspect.currentIndexChanged.connect(self.on_aspect_changed)
+        h_tb.addWidget(self.cbo_aspect)
+
+        self.btn_pick_img = QPushButton("🖼️ Load Image Frame...")
+        self.btn_pick_img.setFixedHeight(28)
+        self.btn_pick_img.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 5px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #EFF6FF;
+                color: #1D4ED8;
+                border-color: #93C5FD;
+            }
+        """)
+        self.btn_pick_img.clicked.connect(self.action_pick_image_frame)
+        h_tb.addWidget(self.btn_pick_img)
+        prev_layout.addLayout(h_tb)
+
+        # Interactive Canvas
+        self.canvas = SubtitlePreviewCanvas()
+        self.canvas.margin_v_changed.connect(self.on_canvas_margin_v_changed)
+        prev_layout.addWidget(self.canvas, stretch=1)
+
+        # Tip bar at bottom of canvas
+        lbl_tip = QLabel("💡 <i>Tip: Click & drag the subtitle box directly on the video canvas to adjust Margin V!</i>")
+        lbl_tip.setStyleSheet("font-size: 11px; color: #2563EB; font-weight: 500;")
+        lbl_tip.setAlignment(Qt.AlignCenter)
+        prev_layout.addWidget(lbl_tip)
+
+        root_layout.addWidget(grp_preview, stretch=6)
+
+    def load_initial_video_and_settings(self):
+        # 1. Load Subtitle settings from parent
+        self.spn_margin_v.setValue(int(self.settings.get("margin_v", 40)))
+        self.slider_margin_v.setValue(self.spn_margin_v.value())
+
+        pos_str = self.settings.get("position", "Bottom Standard (40px)")
+        idx_pos = self.cbo_preset_pos.findText(pos_str)
+        if idx_pos >= 0:
+            self.cbo_preset_pos.setCurrentIndex(idx_pos)
+
+        self.spn_padding.setValue(int(self.settings.get("box_padding", 6)))
+        self.slider_padding.setValue(self.spn_padding.value())
+
+        self.spn_font_sz.setValue(int(self.settings.get("font_size", 32)))
+
+        font_name = self.settings.get("font_name", "Arial")
+        idx_font = self.cbo_font_name.findText(font_name)
+        if idx_font >= 0:
+            self.cbo_font_name.setCurrentIndex(idx_font)
+
+        style_name = self.settings.get("sub_style", "TikTok Black Box (Yellow Text) [Che Sub Chuẩn]")
+        idx_st = self.cbo_style_preset.findText(style_name)
+        if idx_st >= 0:
+            self.cbo_style_preset.setCurrentIndex(idx_st)
+
+        self.border_style = int(self.settings.get("border_style", 3))
+        self.text_color = str(self.settings.get("text_color", "#FFE600"))
+        self.bg_color = str(self.settings.get("bg_color", "#000000"))
+        self.update_color_buttons()
+
+        # 2. Inspect video metadata and load 1st frame
+        if self.current_video_path and Path(self.current_video_path).is_file():
+            meta = get_video_meta(self.current_video_path)
+            self.video_duration = max(1.0, float(meta.get("duration", 15.0)))
+            self.video_aspect = meta.get("aspect_ratio", "9:16")
+
+            # Update timeline slider maximum (steps of 0.1s)
+            max_steps = int(round(self.video_duration * 10))
+            self.slider_timeline.setRange(0, max(10, max_steps))
+            self.slider_timeline.setValue(min(10, max_steps))
+
+            if self.video_aspect == "16:9":
+                self.cbo_aspect.setCurrentIndex(1)
+            else:
+                self.cbo_aspect.setCurrentIndex(0)
+
+            self.load_frame_at(1.0)
+        else:
+            self.refresh_canvas()
+
+    def update_color_buttons(self):
+        def _get_fg(hex_col: str) -> str:
+            try:
+                qc = QColor(hex_col)
+                lum = 0.299 * qc.red() + 0.587 * qc.green() + 0.114 * qc.blue()
+                return "#000000" if lum > 140 else "#FFFFFF"
+            except Exception:
+                return "#000000"
+
+        fg_text = _get_fg(self.text_color)
+        fg_bg = _get_fg(self.bg_color)
+        self.btn_text_color.setStyleSheet(f"background-color: {self.text_color}; color: {fg_text}; font-weight: bold; border: 1px solid #64748B; border-radius: 4px; padding: 2px 6px;")
+        self.btn_bg_color.setStyleSheet(f"background-color: {self.bg_color}; color: {fg_bg}; font-weight: bold; border: 1px solid #64748B; border-radius: 4px; padding: 2px 6px;")
+
+    def load_frame_at(self, sec: float):
+        sec = max(0.0, min(self.video_duration, sec))
+        self.lbl_time_pos.setText(f"{int(sec//60):02d}:{sec%60:04.1f} / {int(self.video_duration//60):02d}:{self.video_duration%60:04.1f}")
+        if self.current_video_path and Path(self.current_video_path).is_file():
+            frame_path = extract_video_frame_at(self.current_video_path, sec)
+            if frame_path and Path(frame_path).is_file():
+                pix = QPixmap(frame_path)
+                if not pix.isNull():
+                    self.canvas.set_background_pixmap(pix)
+                    if pix.width() > pix.height():
+                        self.cbo_aspect.setCurrentIndex(1)
+                    else:
+                        self.cbo_aspect.setCurrentIndex(0)
+        self.refresh_canvas()
+
+    def on_timeline_slider_changed(self, val: int):
+        sec = val / 10.0
+        self.load_frame_at(sec)
+
+    def seek_relative(self, delta: float):
+        curr_sec = self.slider_timeline.value() / 10.0
+        new_sec = max(0.0, min(self.video_duration, curr_sec + delta))
+        self.slider_timeline.setValue(int(round(new_sec * 10)))
+
+    def on_video_selection_changed(self, idx: int):
+        data = self.cbo_video.currentData()
+        if data and Path(data).is_file():
+            self.current_video_path = data
+            meta = get_video_meta(self.current_video_path)
+            self.video_duration = max(1.0, float(meta.get("duration", 15.0)))
+            self.video_aspect = meta.get("aspect_ratio", "9:16")
+            max_steps = int(round(self.video_duration * 10))
+            self.slider_timeline.setRange(0, max(10, max_steps))
+            self.slider_timeline.setValue(min(10, max_steps))
+            self.load_frame_at(1.0)
+
+    def action_browse_custom_video(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Video to Preview Subtitles",
+            "",
+            "Video Files (*.mp4 *.mkv *.mov *.avi *.webm);;All Files (*.*)"
+        )
+        if file_path:
+            self.cbo_video.blockSignals(True)
+            self.cbo_video.addItem(f"📹 {Path(file_path).name}", file_path)
+            self.cbo_video.setCurrentIndex(self.cbo_video.count() - 1)
+            self.cbo_video.blockSignals(False)
+            self.on_video_selection_changed(self.cbo_video.currentIndex())
+
+    def action_pick_image_frame(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Frame Image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp)"
+        )
+        if file_path:
+            pix = QPixmap(file_path)
+            if not pix.isNull():
+                self.canvas.set_background_pixmap(pix)
+                if pix.width() > pix.height():
+                    self.cbo_aspect.setCurrentIndex(1)
+                else:
+                    self.cbo_aspect.setCurrentIndex(0)
+                self.refresh_canvas()
+
+    def on_aspect_changed(self):
+        aspect = self.cbo_aspect.currentData() or "9:16"
+        self.canvas.set_aspect_ratio(aspect)
+
+    def on_canvas_margin_v_changed(self, val: int):
+        self.slider_margin_v.blockSignals(True)
+        self.spn_margin_v.blockSignals(True)
+        self.slider_margin_v.setValue(val)
+        self.spn_margin_v.setValue(val)
+        self.slider_margin_v.blockSignals(False)
+        self.spn_margin_v.blockSignals(False)
+        self.update_preset_from_margin(val)
+
+    def on_margin_slider_changed(self, val: int):
+        self.spn_margin_v.blockSignals(True)
+        self.spn_margin_v.setValue(val)
+        self.spn_margin_v.blockSignals(False)
+        self.canvas.set_margin_v(val)
+        self.update_preset_from_margin(val)
+
+    def on_margin_spin_changed(self, val: int):
+        self.slider_margin_v.blockSignals(True)
+        self.slider_margin_v.setValue(val)
+        self.slider_margin_v.blockSignals(False)
+        self.canvas.set_margin_v(val)
+        self.update_preset_from_margin(val)
+
+    def update_preset_from_margin(self, val: int):
+        preset_map = {
+            40: "Bottom Standard (40px)",
+            120: "Cover Low Sub (120px)",
+            220: "Cover Mid Sub (220px)",
+            50: "Top Header (50px)"
+        }
+        name = preset_map.get(val, "Custom...")
+        self.cbo_preset_pos.blockSignals(True)
+        self.cbo_preset_pos.setCurrentText(name)
+        self.cbo_preset_pos.blockSignals(False)
+
+    def on_preset_pos_changed(self, text: str):
+        preset_map = {
+            "Bottom Standard (40px)": (40, 2),
+            "Cover Low Sub (120px)": (120, 2),
+            "Cover Mid Sub (220px)": (220, 2),
+            "Top Header (50px)": (50, 8)
+        }
+        if text in preset_map:
+            m, align = preset_map[text]
+            self.spn_margin_v.setValue(m)
+            self.cbo_align.blockSignals(True)
+            self.cbo_align.setCurrentIndex(0 if align == 2 else 1)
+            self.cbo_align.blockSignals(False)
+            self.refresh_canvas()
+
+    def on_padding_slider_changed(self, val: int):
+        self.spn_padding.blockSignals(True)
+        self.spn_padding.setValue(val)
+        self.spn_padding.blockSignals(False)
+        self.refresh_canvas()
+
+    def on_padding_spin_changed(self, val: int):
+        self.slider_padding.blockSignals(True)
+        self.slider_padding.setValue(val)
+        self.slider_padding.blockSignals(False)
+        self.refresh_canvas()
+
+    def on_style_preset_changed(self, text: str):
+        if "TikTok Black Box" in text:
+            self.border_style = 3
+            self.text_color = "#FFE600"
+            self.bg_color = "#000000"
+        elif "White Box" in text:
+            self.border_style = 3
+            self.text_color = "#000000"
+            self.bg_color = "#FFFFFF"
+        elif "Black Box (White Text)" in text:
+            self.border_style = 3
+            self.text_color = "#FFFFFF"
+            self.bg_color = "#000000"
+        elif "Yellow Box" in text:
+            self.border_style = 3
+            self.text_color = "#000000"
+            self.bg_color = "#FACC15"
+        elif "Classic Outline" in text:
+            self.border_style = 1
+            self.text_color = "#FFFFFF"
+            self.bg_color = "#000000"
+        self.update_color_buttons()
+        self.refresh_canvas()
+
+    def action_choose_text_color(self):
+        col = QColorDialog.getColor(QColor(self.text_color), self, "Select Text Color")
+        if col.isValid():
+            self.text_color = col.name().upper()
+            self.cbo_style_preset.blockSignals(True)
+            self.cbo_style_preset.setCurrentText("Custom...")
+            self.cbo_style_preset.blockSignals(False)
+            self.update_color_buttons()
+            self.refresh_canvas()
+
+    def action_choose_bg_color(self):
+        col = QColorDialog.getColor(QColor(self.bg_color), self, "Select Box Background Color")
+        if col.isValid():
+            self.bg_color = col.name().upper()
+            self.cbo_style_preset.blockSignals(True)
+            self.cbo_style_preset.setCurrentText("Custom...")
+            self.cbo_style_preset.blockSignals(False)
+            self.update_color_buttons()
+            self.refresh_canvas()
+
+    def on_two_lines_toggled(self, checked: bool):
+        if checked:
+            self.txt_sample_sub.setText("Dòng 1: Phụ đề tiếng Việt che kín sub cũ\nDòng 2: Mô phỏng phụ đề 2 dòng chuẩn xác")
+        else:
+            self.txt_sample_sub.setText("Phụ đề tiếng Việt mẫu để che kín sub cũ")
+
+    def refresh_canvas(self):
+        text = self.txt_sample_sub.text().strip()
+        align = self.cbo_align.currentData() or 2
+        margin = self.spn_margin_v.value()
+        font_nm = self.cbo_font_name.currentText()
+        font_sz = self.spn_font_sz.value()
+        pad = self.spn_padding.value()
+
+        self.canvas.set_subtitle_config(
+            sub_text=text,
+            alignment=align,
+            margin_v=margin,
+            font_name=font_nm,
+            font_size=font_sz,
+            border_style=self.border_style,
+            box_padding=pad,
+            text_color=self.text_color,
+            bg_color=self.bg_color
+        )
+
+    def action_apply_settings(self):
+        """Save settings and accept dialog to synchronize with MainWindow."""
+        self.result_settings = {
+            "position": self.cbo_preset_pos.currentText(),
+            "margin_v": self.spn_margin_v.value(),
+            "alignment": self.cbo_align.currentData() or 2,
+            "box_padding": self.spn_padding.value(),
+            "font_size": self.spn_font_sz.value(),
+            "font_name": self.cbo_font_name.currentText(),
+            "sub_style": self.cbo_style_preset.currentText(),
+            "border_style": self.border_style,
+            "text_color": self.text_color,
+            "bg_color": self.bg_color
+        }
         self.accept()
 
 
@@ -638,6 +2052,14 @@ class MainWindow(QMainWindow):
 
         # Cấu hình Presets cho Subtitle Styling
         self.SUB_STYLE_PRESETS = {
+            "TikTok Black Box (Yellow Text) [Che Sub Chuẩn]": {
+                "border_style": 3,
+                "text_color": "#FFE600",
+                "bg_color": "#000000",
+                "outline_color": "#000000",
+                "outline_width": 6,
+                "shadow_width": 0
+            },
             "White Box (Black Text)": {
                 "border_style": 3,
                 "text_color": "#000000",
@@ -1079,6 +2501,14 @@ class MainWindow(QMainWindow):
         h_sub_pos.addWidget(self.spn_sub_margin_v)
         h_sub_pos.addWidget(lbl_pad)
         h_sub_pos.addWidget(self.spn_box_padding)
+
+        self.btn_preview_sub = QPushButton("👁️ Preview Sub Placement...")
+        self.btn_preview_sub.setFixedHeight(30)
+        self.btn_preview_sub.setStyleSheet("background-color: #EFF6FF; color: #1D4ED8; font-weight: 600; font-size: 12px; border: 1px solid #93C5FD; border-radius: 6px; padding: 0 12px;")
+        self.btn_preview_sub.setToolTip("Open Live Frame Preview to align subtitle position and cover hardsubs perfectly")
+        self.btn_preview_sub.clicked.connect(self.action_open_subtitle_preview_dialog)
+        h_sub_pos.addWidget(self.btn_preview_sub)
+
         h_sub_pos.addStretch()
         layout_export.addLayout(h_sub_pos, 3, 1)
 
@@ -2058,10 +3488,99 @@ class MainWindow(QMainWindow):
             self.cbo_sub_pos.setCurrentText("Custom...")
             self.cbo_sub_pos.blockSignals(False)
 
+    def extract_sample_frame(self, video_path: Path) -> Optional[str]:
+        """Trích xuất 1 khung hình mẫu nhanh (0.05s) bằng FFmpeg để hiển thị trong live preview."""
+        return extract_video_frame_at(video_path, timestamp_sec=1.0)
+
+    @Slot()
+    def action_open_subtitle_preview_dialog(self):
+        """Open modal dialog to preview and align subtitle overlay to cover original hardsubs."""
+        # 1. Thu thập tất cả các video hiện có trong hàng đợi
+        video_paths = []
+        for r in range(self.table_queue.rowCount()):
+            item = self.table_queue.item(r, 0)
+            if item:
+                val = item.text().strip()
+                if val and Path(val).is_file():
+                    video_paths.append(val)
+
+        # 2. Thu thập cấu hình subtitle hiện tại từ MainWindow
+        current_sub_settings = {
+            "position": self.cbo_sub_pos.currentText(),
+            "margin_v": self.spn_sub_margin_v.value(),
+            "alignment": 8 if "Top" in self.cbo_sub_pos.currentText() else 2,
+            "box_padding": self.spn_box_padding.value(),
+            "font_size": self.spn_font_size.value(),
+            "font_name": self.cbo_font.currentText(),
+            "sub_style": self.cbo_sub_style.currentText(),
+            "border_style": getattr(self, "sub_border_style", 3),
+            "text_color": getattr(self, "sub_text_color", "#FFE600"),
+            "bg_color": getattr(self, "sub_bg_color", "#000000"),
+        }
+
+        # 3. Khởi tạo và hiển thị Dialog
+        dialog = SubtitlePreviewDialog(self, video_paths=video_paths, current_settings=current_sub_settings)
+        if dialog.exec():
+            # Đồng bộ các giá trị đã tinh chỉnh từ Preview ngược về MainWindow
+            res = dialog.result_settings
+
+            # Margin V
+            if "margin_v" in res:
+                self.spn_sub_margin_v.setValue(int(res["margin_v"]))
+
+            # Preset Vị trí
+            if "position" in res:
+                self.cbo_sub_pos.blockSignals(True)
+                idx = self.cbo_sub_pos.findText(res["position"])
+                if idx >= 0:
+                    self.cbo_sub_pos.setCurrentIndex(idx)
+                else:
+                    self.cbo_sub_pos.setCurrentText("Custom...")
+                self.cbo_sub_pos.blockSignals(False)
+
+            # Box padding
+            if "box_padding" in res:
+                self.spn_box_padding.setValue(int(res["box_padding"]))
+
+            # Font & Font size
+            if "font_size" in res:
+                self.spn_font_size.setValue(int(res["font_size"]))
+            if "font_name" in res:
+                idx = self.cbo_font.findText(res["font_name"])
+                if idx >= 0:
+                    self.cbo_font.setCurrentIndex(idx)
+
+            # Style preset and colors
+            if "sub_style" in res:
+                idx = self.cbo_sub_style.findText(res["sub_style"])
+                if idx >= 0:
+                    self.cbo_sub_style.setCurrentIndex(idx)
+                else:
+                    self.cbo_sub_style.setCurrentText("Custom...")
+
+            if "border_style" in res:
+                self.sub_border_style = int(res["border_style"])
+            if "text_color" in res:
+                self.sub_text_color = res["text_color"]
+            if "bg_color" in res:
+                self.sub_bg_color = res["bg_color"]
+
+            self.update_sub_color_swatches()
+            self.append_log(
+                f"🎯 Đã cập nhật cấu hình phụ đề từ Preview: Margin V={self.spn_sub_margin_v.value()}px, "
+                f"Box Pad={self.spn_box_padding.value()}px, Font={self.cbo_font.currentText()} ({self.spn_font_size.value()}pt)"
+            )
+
     @Slot()
     def action_open_watermark_dialog(self):
-        """Open modal dialog to configure text and logo watermarks."""
-        dialog = WatermarkConfigDialog(self, self.watermark_config)
+        """Open modal dialog to configure text and logo watermarks with real-time live preview."""
+        sample_frame = None
+        if self.table_queue.rowCount() > 0:
+            first_src = self.table_queue.item(0, 0).text() if self.table_queue.item(0, 0) else ""
+            if first_src and Path(first_src).is_file():
+                sample_frame = self.extract_sample_frame(Path(first_src))
+
+        dialog = WatermarkConfigDialog(self, self.watermark_config, sample_frame_path=sample_frame)
         if dialog.exec():
             self.watermark_config = dialog.config
             self.update_watermark_summary()

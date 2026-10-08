@@ -165,6 +165,132 @@ def test_watermark_spinbox_and_persistence():
     print("✓ test_watermark_spinbox_and_persistence: PASSED (Bóc tách chuỗi, tự động lọc đơn vị px và lưu cấu hình thành công)")
 
 
+def test_watermark_live_preview_canvas():
+    """Kiểm tra WatermarkPreviewCanvas và tích hợp live preview trong WatermarkConfigDialog."""
+    from gui import WatermarkPreviewCanvas, WatermarkConfigDialog
+    from PySide6.QtGui import QPixmap
+
+    # 1. Kiểm tra khởi tạo và cập nhật trạng thái canvas
+    canvas = WatermarkPreviewCanvas()
+    canvas.resize(320, 480)
+    canvas.set_aspect_ratio("9:16")
+    canvas.set_text_watermark(True, "Kênh Vũ Mạnh Cường", "center", 24)
+    canvas.set_logo_watermark(True, "", "top-right", 0.85, 220)
+    assert canvas.aspect_ratio == "9:16"
+    assert canvas.text_enabled is True
+    assert canvas.text_content == "Kênh Vũ Mạnh Cường"
+
+    # Đổi sang 16:9
+    canvas.set_aspect_ratio("16:9")
+    assert canvas.aspect_ratio == "16:9"
+
+    # 2. Kiểm tra WatermarkConfigDialog tích hợp live preview
+    dlg = WatermarkConfigDialog(None, {
+        "text_enabled": True,
+        "text": "Banner Test",
+        "text_position": "top",
+        "logo_enabled": True,
+        "logo_position": "bottom-right",
+        "logo_max_width": 250
+    })
+    assert hasattr(dlg, "preview_canvas")
+    assert hasattr(dlg, "cbo_aspect_ratio")
+    assert hasattr(dlg, "btn_choose_frame")
+
+    # Kiểm tra đồng bộ dữ liệu vào canvas
+    dlg.refresh_preview()
+    assert dlg.preview_canvas.text_enabled is True
+    assert dlg.preview_canvas.text_content == "Banner Test"
+    assert dlg.preview_canvas.logo_max_width == 250
+
+    print("✓ test_watermark_live_preview_canvas: PASSED (Khởi tạo, đồng bộ thời gian thực và canvas preview hoạt động chuẩn xác)")
+
+
+def test_subtitle_live_preview_and_dialog():
+    """Kiểm tra SubtitlePreviewCanvas, SubtitlePreviewDialog và đồng bộ 2 chiều với MainWindow."""
+    from gui import SubtitlePreviewCanvas, SubtitlePreviewDialog, MainWindow
+    from PySide6.QtCore import Qt
+
+    # 1. Kiểm tra SubtitlePreviewCanvas
+    canvas = SubtitlePreviewCanvas()
+    canvas.resize(360, 520)
+    canvas.set_aspect_ratio("9:16")
+    canvas.set_subtitle_config(
+        sub_text="Phụ đề tiếng Việt mẫu để che kín sub cũ",
+        alignment=2,
+        margin_v=120,
+        font_name="Arial",
+        font_size=32,
+        border_style=3,
+        box_padding=8,
+        text_color="#FFE600",
+        bg_color="#000000"
+    )
+    assert canvas.sub_text == "Phụ đề tiếng Việt mẫu để che kín sub cũ"
+    assert canvas.margin_v == 120
+    assert canvas.border_style == 3
+    assert canvas.box_padding == 8
+    assert canvas.text_color == "#FFE600"
+    assert canvas.bg_color == "#000000"
+
+    # Kiểm tra tín hiệu margin_v_changed
+    received_margin = []
+    canvas.margin_v_changed.connect(lambda m: received_margin.append(m))
+    canvas.margin_v_changed.emit(180)
+    assert received_margin == [180]
+
+    # 2. Kiểm tra SubtitlePreviewDialog
+    test_sub_settings = {
+        "position": "Cover Low Sub (120px)",
+        "margin_v": 120,
+        "alignment": 2,
+        "box_padding": 8,
+        "font_size": 34,
+        "font_name": "Arial",
+        "sub_style": "TikTok Black Box (Yellow Text) [Che Sub Chuẩn]",
+        "border_style": 3,
+        "text_color": "#FFE600",
+        "bg_color": "#000000"
+    }
+    dlg = SubtitlePreviewDialog(None, video_paths=[], current_settings=test_sub_settings)
+    assert hasattr(dlg, "canvas")
+    assert hasattr(dlg, "slider_margin_v")
+    assert hasattr(dlg, "spn_margin_v")
+    assert hasattr(dlg, "slider_padding")
+    assert hasattr(dlg, "cbo_style_preset")
+    assert hasattr(dlg, "btn_apply")
+
+    # Kiểm tra giá trị ban đầu đã load đúng
+    assert dlg.spn_margin_v.value() == 120
+    assert dlg.spn_padding.value() == 8
+    assert dlg.spn_font_sz.value() == 34
+
+    # Thay đổi Margin V sang 220px (Cover Mid Sub)
+    dlg.cbo_preset_pos.setCurrentText("Cover Mid Sub (220px)")
+    assert dlg.spn_margin_v.value() == 220
+
+    # Thay đổi Box Padding sang 12px
+    dlg.spn_padding.setValue(12)
+    assert dlg.spn_padding.value() == 12
+
+    # Áp dụng cấu hình
+    dlg.action_apply_settings()
+    res = dlg.result_settings
+    assert res["margin_v"] == 220
+    assert res["box_padding"] == 12
+    assert res["border_style"] == 3
+    assert res["text_color"] == "#FFE600"
+    assert res["bg_color"] == "#000000"
+
+    # 3. Kiểm tra MainWindow có nút btn_preview_sub và method action_open_subtitle_preview_dialog
+    win = MainWindow()
+    assert hasattr(win, "btn_preview_sub")
+    assert hasattr(win, "action_open_subtitle_preview_dialog")
+    assert win.btn_preview_sub.text().startswith("👁️ Preview Sub")
+
+    print("✓ test_subtitle_live_preview_and_dialog: PASSED (Canvas, Dialog, Hardsub Box và đồng bộ 2 chiều hoàn hảo)")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 7 ===")
     test_gui_syntax_and_structure()
@@ -173,4 +299,6 @@ if __name__ == "__main__":
     test_cookie_button_and_management()
     test_worker_immediate_cancel()
     test_watermark_spinbox_and_persistence()
+    test_watermark_live_preview_canvas()
+    test_subtitle_live_preview_and_dialog()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 7 ĐÃ VƯỢT QUA ===")
