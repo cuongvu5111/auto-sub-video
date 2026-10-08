@@ -4,6 +4,7 @@
 
 # Tải video từ TikTok/Douyin không dính watermark
 yt-dlp>=2024.8.6
+curl-cffi>=0.7.0
 
 # Nhận diện giọng nói siêu nhanh trên CPU (CTranslate2)
 faster-whisper>=1.0.3

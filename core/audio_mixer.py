@@ -232,15 +232,14 @@ def _init_pydub():
 
     # 4. Ngăn chặn pydub mở cửa sổ console phụ trên Windows khi gọi subprocess ffmpeg
     if sys.platform == "win32":
-        _orig_sub_popen = subprocess.Popen
-        def _silent_popen(*args, **kwargs):
-            kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
-            return _orig_sub_popen(*args, **kwargs)
+        class _SilentPopen(subprocess.Popen):
+            """Class kế thừa chuẩn từ subprocess.Popen, tự động chèn CREATE_NO_WINDOW trên Windows."""
+            def __init__(self, *args, **kwargs):
+                kwargs.setdefault("creationflags", subprocess.CREATE_NO_WINDOW)
+                super().__init__(*args, **kwargs)
 
-        if hasattr(pydub.audio_segment, "subprocess"):
-            pydub.audio_segment.subprocess.Popen = _silent_popen
         if hasattr(pydub.utils, "Popen"):
-            pydub.utils.Popen = _silent_popen
+            pydub.utils.Popen = _SilentPopen
 
 
 def _load_audio_file(file_path: Union[str, Path]):

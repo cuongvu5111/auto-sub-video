@@ -85,6 +85,19 @@ def download_video(
         }
     }
 
+    # 1. Tự động nạp cookies.txt nếu người dùng đặt trong thư mục dự án
+    cookie_candidate = Config.BASE_DIR / "cookies.txt"
+    if cookie_candidate.exists():
+        ydl_opts["cookiefile"] = str(cookie_candidate)
+
+    # 2. Tự động kích hoạt impersonation chrome (qua curl-cffi) nếu có cài đặt
+    try:
+        import curl_cffi
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+        ydl_opts["impersonate"] = ImpersonateTarget.from_str("chrome")
+    except (ImportError, Exception):
+        pass
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(source, download=True)
@@ -106,4 +119,12 @@ def download_video(
             return downloaded_path.resolve()
 
     except Exception as e:
-        raise DownloadError(f"Lỗi khi tải video từ {source}: {str(e)}") from e
+        err_msg = str(e)
+        if "Fresh cookies" in err_msg or "403" in err_msg:
+            friendly_msg = (
+                "Douyin/TikTok yêu cầu xác thực Cookie chống bot! "
+                "Vui lòng tải video về máy qua trang trung gian (như unduhtiktok.com / snaptik) rồi chọn tệp video cục bộ qua nút '+ Add Videos...', "
+                "hoặc đặt tệp cookies.txt vào thư mục dự án."
+            )
+            raise DownloadError(friendly_msg) from e
+        raise DownloadError(f"Lỗi khi tải video từ {source}: {err_msg}") from e
