@@ -122,10 +122,55 @@ def test_cookie_button_and_management():
     print("✓ test_cookie_button_and_management: PASSED (Nút Cookies, đổi trạng thái động và dọn dẹp hoạt động chuẩn xác)")
 
 
+def test_worker_immediate_cancel():
+    """Kiểm tra DubbingWorker và pipeline dừng ngay lập tức khi nhận yêu cầu cancel."""
+    from gui import DubbingWorker
+    from pipeline import run_pipeline
+
+    tasks = [{"row": 0, "source": "dummy_video.mp4"}]
+    worker = DubbingWorker(tasks, {})
+    worker.cancel()
+    assert worker._is_cancelled is True
+
+    # Kiểm tra pipeline phát hiện cancel_check và ngắt lập tức
+    interrupted = False
+    try:
+        run_pipeline("dummy_video.mp4", cancel_check=lambda: True)
+    except InterruptedError:
+        interrupted = True
+    assert interrupted, "run_pipeline không dừng ngay khi cancel_check trả về True!"
+
+    print("✓ test_worker_immediate_cancel: PASSED (Huỷ ngang tức thì khi nhận tín hiệu Stop)")
+
+
+def test_watermark_spinbox_and_persistence():
+    """Kiểm tra WatermarkConfigDialog bóc tách số từ input và lưu cấu hình không bị reset."""
+    from gui import WatermarkConfigDialog
+
+    dlg = WatermarkConfigDialog(None, {"logo_max_width": 160})
+    dlg.spn_logo_max_width.lineEdit().setText("350")
+    dlg.action_save()
+    assert dlg.config["logo_max_width"] == 350, f"Expected 350, got {dlg.config['logo_max_width']}"
+
+    dlg2 = WatermarkConfigDialog(None, {"logo_max_width": 160})
+    dlg2.spn_logo_max_width.lineEdit().setText("450px")
+    dlg2.action_save()
+    assert dlg2.config["logo_max_width"] == 450
+
+    dlg3 = WatermarkConfigDialog(None, {"logo_max_width": 160})
+    dlg3.spn_logo_max_width.lineEdit().setText("   800 px  ")
+    dlg3.action_save()
+    assert dlg3.config["logo_max_width"] == 800
+
+    print("✓ test_watermark_spinbox_and_persistence: PASSED (Bóc tách chuỗi, tự động lọc đơn vị px và lưu cấu hình thành công)")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 7 ===")
     test_gui_syntax_and_structure()
     test_worker_signals_and_button_recovery()
     test_paste_links_dialog()
     test_cookie_button_and_management()
+    test_worker_immediate_cancel()
+    test_watermark_spinbox_and_persistence()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 7 ĐÃ VƯỢT QUA ===")

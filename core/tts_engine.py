@@ -233,7 +233,8 @@ def process_dubbing_segments(
     segments: List[Dict[str, Any]],
     voice: Optional[str] = None,
     output_dir: Optional[Path] = None,
-    progress_callback: Optional[Callable[[str, float], None]] = None
+    progress_callback: Optional[Callable[[str, float], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None
 ) -> List[Dict[str, Any]]:
     """
     Xử lý hàng loạt toàn bộ danh sách câu thoại:
@@ -245,6 +246,7 @@ def process_dubbing_segments(
         voice: Giọng đọc (mặc định lấy từ Config.DEFAULT_VOICE).
         output_dir: Thư mục lưu các file audio thành phẩm.
         progress_callback: Hàm nhận (thông điệp, phần trăm tiến độ).
+        cancel_check: Hàm kiểm tra xem người dùng có yêu cầu dừng tiến trình hay không.
 
     Returns:
         List[Dict[str, Any]]: Danh sách phân đoạn được bổ sung "dubbed_audio_path" và "dubbed_duration".
@@ -260,6 +262,9 @@ def process_dubbing_segments(
     enriched_segments = []
 
     for idx, seg in enumerate(segments):
+        if cancel_check and cancel_check():
+            raise InterruptedError("Tiến trình lồng tiếng đã bị dừng bởi người dùng.")
+
         text = seg.get("translated_text", "").strip() or seg.get("text", "").strip()
         start = seg.get("start", 0.0)
         end = seg.get("end", 0.0)

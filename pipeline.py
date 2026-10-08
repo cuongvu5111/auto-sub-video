@@ -37,7 +37,8 @@ def run_pipeline(
     watermark_options: Optional[Dict[str, Any]] = None,
     encoder: Optional[str] = None,
     output_dir: Optional[Path] = None,
-    progress_callback: Optional[Callable[[str, float], None]] = None
+    progress_callback: Optional[Callable[[str, float], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None
 ) -> Path:
     """
     Điều phối toàn bộ luồng xử lý tự động từ Video nguồn (Link/Tệp) ra Video thành phẩm.
@@ -51,8 +52,10 @@ def run_pipeline(
         custom_terms: Quy tắc từ khóa hoặc tên riêng cố định.
         subtitle_options: Tùy chỉnh màu sắc, cỡ chữ, căn chỉnh vị trí (margin_v, alignment).
         watermark_options: Tùy chỉnh Text Watermark (giữa video) và Logo Watermark (ảnh, opacity).
+        encoder: Bộ mã hóa phần cứng (h264_nvenc, libx264,...).
         output_dir: Thư mục lưu video thành phẩm.
         progress_callback: Hàm nhận (thông điệp, phần trăm tiến độ tổng thể).
+        cancel_check: Hàm kiểm tra xem người dùng có yêu cầu dừng tiến trình hay không.
 
     Returns:
         Path: Đường dẫn video thành phẩm đã được lồng tiếng Việt và gắn phụ đề.
@@ -60,20 +63,31 @@ def run_pipeline(
     target_out_dir = Path(output_dir or Config.OUTPUT_DIR).resolve()
     target_out_dir.mkdir(parents=True, exist_ok=True)
 
+    def check_cancel():
+        if cancel_check and cancel_check():
+            raise InterruptedError("Tiến trình đã bị dừng bởi người dùng.")
+
     def report(msg: str, percent: float):
+        check_cancel()
         if progress_callback:
             progress_callback(msg, percent)
         else:
             print(f"[{percent:5.1f}%] {msg}")
 
+    check_cancel()
+
     # STEP 1: Download or load local video
     report("Step 1/6: Preparing and loading input video...", 5.0)
     video_path = download_video(source, progress_callback=lambda m, p: report(f"Step 1/6: {m}", 5.0 + p * 0.15))
+
+    check_cancel()
 
     # STEP 2: Extract audio to 16kHz mono WAV
     report("Step 2/6: Extracting audio from video...", 20.0)
     raw_audio_path = Config.TEMP_DIR / f"{video_path.stem}_raw.wav"
     extract_audio(video_path, raw_audio_path)
+
+    check_cancel()
 
     # STEP 3: Speech-to-Text with word timestamps
     report("Step 3/6: Transcribing speech and timestamps with Whisper...", 35.0)
@@ -88,6 +102,8 @@ def run_pipeline(
     if not segments:
         raise ValueError("No speech or dialogue detected in this video.")
 
+    check_cancel()
+
     # STEP 4: Contextual LLM translation
     report("Step 4/6: Translating dialogues with LLM...", 55.0)
     translated_segments = translate_segments(
@@ -96,16 +112,22 @@ def run_pipeline(
         target_lang="Vietnamese",
         genre=genre,
         custom_terms=custom_terms,
-        progress_callback=lambda m, p: report(f"Step 4/6: {m}", 55.0 + p * 0.10)
+        progress_callback=lambda m, p: report(f"Step 4/6: {m}", 55.0 + p * 0.10),
+        cancel_check=cancel_check
     )
+
+    check_cancel()
 
     # STEP 5: AI voice synthesis and atempo synchronization
     report("Step 5/6: Synthesizing AI voice dubbing and syncing tempo...", 68.0)
     dubbed_segments = process_dubbing_segments(
         translated_segments,
         voice=voice,
-        progress_callback=lambda m, p: report(f"Step 5/6: {m}", 68.0 + p * 0.17)
+        progress_callback=lambda m, p: report(f"Step 5/6: {m}", 68.0 + p * 0.17),
+        cancel_check=cancel_check
     )
+
+    check_cancel()
 
     # STEP 6: Audio ducking and video rendering
     report("Step 6/6: Mixing audio and rendering final video...", 88.0)
@@ -118,6 +140,8 @@ def run_pipeline(
         mixed_audio_file,
         ducking_volume=ducking_volume
     )
+
+    check_cancel()
 
     # 6b. Generate ASS subtitle file if requested (or if text watermark enabled)
     ass_file = None
@@ -153,6 +177,8 @@ def run_pipeline(
             text_watermark=text_wm_config
         )
 
+    check_cancel()
+
     # 6c. Render finalized video
     final_video_name = f"{video_path.stem}_vi.mp4"
     final_video_path = target_out_dir / final_video_name
@@ -164,8 +190,10 @@ def run_pipeline(
         ass_subtitle_path=ass_file,
         watermark_options=wm_opts,
         encoder=encoder,
-        progress_callback=lambda m, p: report(f"Step 6/6: {m}", 90.0 + p * 0.10)
+        progress_callback=lambda m, p: report(f"Step 6/6: {m}", 90.0 + p * 0.10),
+        cancel_check=cancel_check
     )
+
 
     report(f"Pipeline completed! Video successfully saved to: {final_video_path}", 100.0)
     return final_video_path

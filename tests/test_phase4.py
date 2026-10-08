@@ -86,6 +86,55 @@ def test_llm_connection_validation():
     print("✓ test_llm_connection_validation: PASSED")
 
 
+def test_multi_provider_failover():
+    """Kiểm tra cơ chế chuyển đổi tự động sang Backup Provider khi Primary bị 429 Rate Limit."""
+    import json
+    from unittest.mock import MagicMock, patch
+    from config import Config
+    from core.translator import translate_segments
+
+    orig_backup_en = Config.LLM_BACKUP_ENABLED
+    orig_backup_url = Config.LLM_BACKUP_BASE_URL
+    orig_backup_key = Config.LLM_BACKUP_API_KEY
+    orig_backup_model = Config.LLM_BACKUP_MODEL
+
+    try:
+        Config.LLM_BACKUP_ENABLED = True
+        Config.LLM_BACKUP_BASE_URL = "https://api.backup.com/v1"
+        Config.LLM_BACKUP_API_KEY = "backup-key-123"
+        Config.LLM_BACKUP_MODEL = "gemini-backup"
+
+        segments = [{"index": 0, "start": 0.0, "end": 2.0, "text": "你好"}]
+        logs = []
+
+        mock_primary = MagicMock()
+        mock_primary.chat.completions.create.side_effect = Exception("429 Rate Limit reached")
+
+        mock_backup = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.choices = [MagicMock()]
+        mock_resp.choices[0].message.content = json.dumps([{"index": 0, "translated_text": "Xin chào"}])
+        mock_backup.chat.completions.create.return_value = mock_resp
+
+        def mock_client_init(base_url, **kwargs):
+            if "backup" in str(base_url):
+                return mock_backup
+            return mock_primary
+
+        with patch("openai.OpenAI", side_effect=mock_client_init):
+            results = translate_segments(segments, progress_callback=lambda msg, pct: logs.append(msg))
+
+        assert results[0]["translated_text"] == "Xin chào"
+        assert any("switch sang Backup" in log for log in logs)
+        print("✓ test_multi_provider_failover: PASSED (Tự động failover sang Backup Provider khi Primary gặp 429)")
+
+    finally:
+        Config.LLM_BACKUP_ENABLED = orig_backup_en
+        Config.LLM_BACKUP_BASE_URL = orig_backup_url
+        Config.LLM_BACKUP_API_KEY = orig_backup_key
+        Config.LLM_BACKUP_MODEL = orig_backup_model
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 4 ===")
     test_clean_json_response()
@@ -93,4 +142,5 @@ if __name__ == "__main__":
     test_prompt_builder()
     test_llm_config_persistence()
     test_llm_connection_validation()
+    test_multi_provider_failover()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 4 ĐÃ VƯỢT QUA ===")

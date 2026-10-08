@@ -6,6 +6,7 @@ dual-column settings, smooth progress bar, and real-time terminal console log.
 
 import sys
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,13 +21,13 @@ if sys.platform == "win32":
         pass
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
-from PySide6.QtGui import QFont, QColor, QPixmap
+from PySide6.QtGui import QFont, QColor, QPixmap, QValidator
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, QLineEdit, QCheckBox,
     QLabel, QProgressBar, QTextEdit, QFileDialog, QInputDialog, QMessageBox,
-    QGroupBox, QColorDialog, QDialog, QSlider
+    QGroupBox, QColorDialog, QDialog, QSlider, QScrollArea
 )
 
 from config import Config
@@ -88,16 +89,23 @@ class DubbingWorker(QThread):
                         watermark_options=self.options.get("watermark_options"),
                         encoder=self.options.get("encoder"),
                         output_dir=self.options.get("output_dir"),
-                        progress_callback=progress_hook
+                        progress_callback=progress_hook,
+                        cancel_check=lambda: self._is_cancelled
                     )
                     success_count += 1
                     self.sig_item_status.emit(row, f"✓ Done - {final_video.name}", "#27AE60")
                     self.sig_log.emit(f"✓ COMPLETED: {final_video.name}")
 
+                except InterruptedError:
+                    self.sig_item_status.emit(row, "⏹ Stopped", "#95A5A6")
+                    self.sig_log.emit("⏹ STOPPED: Tiến trình đã dừng ngay lập tức theo yêu cầu.")
+                    break
                 except Exception as e:
                     self.sig_item_status.emit(row, f"❌ Failed: {str(e)[:30]}", "#E74C3C")
                     self.sig_log.emit(f"❌ ERROR PROCESSING: {str(e)}")
 
+            if self._is_cancelled:
+                self.sig_log.emit("\n⚠️ Batch processing cancelled by user.")
             self.sig_progress.emit(100.0)
             self.sig_log.emit(f"\n=== FINISHED: {success_count}/{total} VIDEOS SUCCESSFUL ===")
         finally:
@@ -265,6 +273,30 @@ class PasteLinksDialog(QDialog):
         return [line.strip() for line in raw_text.splitlines() if line.strip()]
 
 
+class RobustSpinBox(QSpinBox):
+    """
+    QSpinBox thông minh tự động bóc tách số và bỏ qua hậu tố ' px' hoặc nhập thiếu khoảng trắng,
+    tránh việc reset về giá trị mặc định khi người dùng gõ rồi click ra ngoài (focus loss).
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setKeyboardTracking(False)
+        self.lineEdit().editingFinished.connect(self._on_editing_finished)
+
+    def _on_editing_finished(self):
+        self.interpretText()
+
+    def valueFromText(self, text: str) -> int:
+        nums = re.findall(r"\d+", text)
+        if nums:
+            val = int(nums[0])
+            return max(self.minimum(), min(self.maximum(), val))
+        return self.value()
+
+    def validate(self, text: str, pos: int):
+        return (QValidator.State.Acceptable, text, pos)
+
+
 class WatermarkConfigDialog(QDialog):
     """
     Modal dialog allowing users to configure Text Watermark and Logo Image Watermark
@@ -394,9 +426,9 @@ class WatermarkConfigDialog(QDialog):
         grid_text.addWidget(self.cbo_text_pos, 2, 1)
 
         grid_text.addWidget(QLabel("Font Size:"), 3, 0)
-        self.spn_text_font_size = QSpinBox()
+        self.spn_text_font_size = RobustSpinBox()
         self.spn_text_font_size.setFixedHeight(32)
-        self.spn_text_font_size.setRange(14, 48)
+        self.spn_text_font_size.setRange(10, 120)
         self.spn_text_font_size.setValue(22)
         grid_text.addWidget(self.spn_text_font_size, 3, 1)
 
@@ -472,9 +504,9 @@ class WatermarkConfigDialog(QDialog):
         grid_logo.addLayout(h_op, 3, 1)
 
         grid_logo.addWidget(QLabel("Max Width:"), 4, 0)
-        self.spn_logo_max_width = QSpinBox()
+        self.spn_logo_max_width = RobustSpinBox()
         self.spn_logo_max_width.setFixedHeight(32)
-        self.spn_logo_max_width.setRange(60, 400)
+        self.spn_logo_max_width.setRange(10, 1920)
         self.spn_logo_max_width.setValue(160)
         self.spn_logo_max_width.setSuffix(" px")
         grid_logo.addWidget(self.spn_logo_max_width, 4, 1)
@@ -562,6 +594,10 @@ class WatermarkConfigDialog(QDialog):
             self.chk_logo_enable.setChecked(True)
 
     def action_save(self):
+        # Đảm bảo bóc tách giá trị mới nhất trong ô nhập kể cả khi vừa gõ xong chưa bấm Enter
+        self.spn_text_font_size.interpretText()
+        self.spn_logo_max_width.interpretText()
+
         self.config["text_enabled"] = self.chk_text_enable.isChecked()
         self.config["text"] = self.txt_text_content.text().strip()
         self.config["text_timing"] = self.cbo_text_timing.currentData() or "mid_video"
@@ -664,10 +700,15 @@ class MainWindow(QMainWindow):
                 "api_key": "",
                 "model": "gpt-4o-mini"
             },
+            "Google AI Studio (Gemini)": {
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                "api_key": "",
+                "model": "gemini-2.5-flash"
+            },
             "Groq Cloud (https://api.groq.com/openai/v1)": {
                 "base_url": "https://api.groq.com/openai/v1",
                 "api_key": "",
-                "model": "llama-3.3-70b-versatile"
+                "model": "qwen/qwen3.8-27b"
             },
             "DeepSeek API (https://api.deepseek.com/v1)": {
                 "base_url": "https://api.deepseek.com/v1",
@@ -1185,15 +1226,46 @@ class MainWindow(QMainWindow):
         self.append_log("• Ready! Paste TikTok links or add video files to begin.")
         tab_layout.addWidget(self.txt_console)
 
-        # 7. MODEL MANAGER TAB
-        layout_models = QVBoxLayout(self.tab_models)
-        layout_models.setContentsMargins(40, 30, 40, 30)
-        layout_models.setSpacing(16)
+        # 7. MODEL MANAGER TAB (Scrollable for Multi-Provider AI Failover)
+        scroll_models = QScrollArea(self.tab_models)
+        scroll_models.setWidgetResizable(True)
+        scroll_models.setFrameShape(QScrollArea.NoFrame)
+        scroll_models.setStyleSheet("background-color: transparent;")
+
+        models_container = QWidget()
+        models_container.setStyleSheet("background-color: transparent;")
+        layout_models = QVBoxLayout(models_container)
+        layout_models.setContentsMargins(30, 20, 30, 30)
+        layout_models.setSpacing(18)
         layout_models.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
 
-        grp_model_cfg = QGroupBox("⚙️ LLM && AI Service Settings")
-        grp_model_cfg.setMaximumWidth(760)
-        grp_model_cfg.setStyleSheet("""
+        tab_models_outer = QVBoxLayout(self.tab_models)
+        tab_models_outer.setContentsMargins(0, 0, 0, 0)
+        tab_models_outer.addWidget(scroll_models)
+        scroll_models.setWidget(models_container)
+
+        # Header description
+        info_box = QWidget()
+        info_box.setMaximumWidth(780)
+        info_box_layout = QVBoxLayout(info_box)
+        info_box_layout.setContentsMargins(0, 0, 0, 0)
+        info_box_layout.setSpacing(4)
+
+        info_title = QLabel("<b>Configure AI Translation Services (Multi-Model Failover)</b>")
+        info_title.setStyleSheet("font-size: 16px; color: #0F172A;")
+        info_box_layout.addWidget(info_title)
+
+        info_desc = QLabel(
+            "AutoDub Studio supports multiple AI model providers with <b>automatic failover</b>. "
+            "If your Primary provider hits a rate limit (HTTP 429) or experiences an outage, "
+            "the system instantly switches to your Fallback provider without interrupting video processing."
+        )
+        info_desc.setWordWrap(True)
+        info_desc.setStyleSheet("font-size: 12px; color: #475569; line-height: 1.4;")
+        info_box_layout.addWidget(info_desc)
+        layout_models.addWidget(info_box)
+
+        group_style = """
             QGroupBox {
                 background-color: #FFFFFF;
                 border: 1px solid #CBD5E1;
@@ -1209,107 +1281,185 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
                 font-size: 13px;
             }
-        """)
-        layout_cfg = QVBoxLayout(grp_model_cfg)
-        layout_cfg.setContentsMargins(28, 22, 28, 22)
-        layout_cfg.setSpacing(16)
+        """
 
-        info_title = QLabel("<b>Configure AI Translation Services</b>")
-        info_title.setStyleSheet("font-size: 15px; color: #0F172A;")
-        layout_cfg.addWidget(info_title)
+        # --- GROUP 1: PRIMARY PROVIDER ---
+        grp_primary = QGroupBox("🥇 Primary AI Provider (Main)")
+        grp_primary.setMaximumWidth(780)
+        grp_primary.setStyleSheet(group_style)
+        layout_primary = QVBoxLayout(grp_primary)
+        layout_primary.setContentsMargins(24, 20, 24, 20)
+        layout_primary.setSpacing(14)
 
-        info_desc = QLabel(
-            "AutoDub Studio supports any OpenAI-compatible LLM endpoint (Ollama local, VNPT-SI, Groq, DeepSeek, OpenAI).<br>"
-            "Select a preset or customize parameters. Settings are saved permanently to your <code>.env</code> file."
-        )
-        info_desc.setWordWrap(True)
-        info_desc.setStyleSheet("font-size: 12px; color: #475569; line-height: 1.4;")
-        layout_cfg.addWidget(info_desc)
+        grid_primary = QGridLayout()
+        grid_primary.setVerticalSpacing(12)
+        grid_primary.setHorizontalSpacing(16)
+        grid_primary.setColumnMinimumWidth(0, 130)
 
-        # Form Grid
-        form_grid = QGridLayout()
-        form_grid.setVerticalSpacing(14)
-        form_grid.setHorizontalSpacing(16)
-        form_grid.setColumnStretch(0, 0)
-        form_grid.setColumnStretch(1, 1)
-        form_grid.setColumnMinimumWidth(0, 130)
-
-        # Row 0: Provider Preset
-        lbl_preset = QLabel("Provider Preset:")
-        lbl_preset.setStyleSheet("font-weight: 500; font-size: 12px;")
-        form_grid.addWidget(lbl_preset, 0, 0)
+        grid_primary.addWidget(QLabel("Provider Preset:"), 0, 0)
         self.cbo_tab_preset = QComboBox()
         self.cbo_tab_preset.setFixedHeight(34)
         self.cbo_tab_preset.addItems(list(self.LLM_PRESETS.keys()))
         self.cbo_tab_preset.currentTextChanged.connect(self.on_tab_preset_changed)
-        form_grid.addWidget(self.cbo_tab_preset, 0, 1)
+        grid_primary.addWidget(self.cbo_tab_preset, 0, 1)
 
-        # Row 1: Base URL
-        lbl_url = QLabel("Base URL:")
-        lbl_url.setStyleSheet("font-weight: 500; font-size: 12px;")
-        form_grid.addWidget(lbl_url, 1, 0)
+        grid_primary.addWidget(QLabel("Base URL:"), 1, 0)
         self.txt_tab_url = QLineEdit(Config.LLM_BASE_URL)
         self.txt_tab_url.setFixedHeight(34)
-        self.txt_tab_url.setPlaceholderText("https://api.openai.com/v1")
-        form_grid.addWidget(self.txt_tab_url, 1, 1)
+        self.txt_tab_url.setPlaceholderText("https://api.groq.com/openai/v1")
+        grid_primary.addWidget(self.txt_tab_url, 1, 1)
 
-        # Row 2: API Key with Show/Hide toggle
-        lbl_key = QLabel("API Key:")
-        lbl_key.setStyleSheet("font-weight: 500; font-size: 12px;")
-        form_grid.addWidget(lbl_key, 2, 0)
-        h_tab_key = QHBoxLayout()
-        h_tab_key.setSpacing(6)
+        grid_primary.addWidget(QLabel("API Key:"), 2, 0)
+        h_primary_key = QHBoxLayout()
+        h_primary_key.setSpacing(6)
         self.txt_tab_key = QLineEdit(Config.LLM_API_KEY)
         self.txt_tab_key.setFixedHeight(34)
         self.txt_tab_key.setEchoMode(QLineEdit.Password)
-        self.txt_tab_key.setPlaceholderText("sk-... or no-key-required")
+        self.txt_tab_key.setPlaceholderText("sk-... or gsk_... or no-key-required")
         self.btn_toggle_tab_key = QPushButton("👁️")
         self.btn_toggle_tab_key.setFixedSize(38, 34)
         self.btn_toggle_tab_key.setToolTip("Show / Hide API Key")
         self.btn_toggle_tab_key.setStyleSheet("background-color: #F8FAFC; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px;")
         self.btn_toggle_tab_key.clicked.connect(self.toggle_tab_key_visibility)
-        h_tab_key.addWidget(self.txt_tab_key)
-        h_tab_key.addWidget(self.btn_toggle_tab_key)
-        form_grid.addLayout(h_tab_key, 2, 1)
+        h_primary_key.addWidget(self.txt_tab_key)
+        h_primary_key.addWidget(self.btn_toggle_tab_key)
+        grid_primary.addLayout(h_primary_key, 2, 1)
 
-        # Row 3: Model Name
-        lbl_model = QLabel("Model Name:")
-        lbl_model.setStyleSheet("font-weight: 500; font-size: 12px;")
-        form_grid.addWidget(lbl_model, 3, 0)
+        grid_primary.addWidget(QLabel("Model Name:"), 3, 0)
         self.txt_tab_model = QLineEdit(Config.LLM_MODEL)
         self.txt_tab_model.setFixedHeight(34)
-        self.txt_tab_model.setPlaceholderText("e.g. gpt-4o-mini, gemma-4-26B-A4B-it")
-        form_grid.addWidget(self.txt_tab_model, 3, 1)
+        self.txt_tab_model.setPlaceholderText("e.g. qwen/qwen3.8-27b, gpt-4o-mini")
+        grid_primary.addWidget(self.txt_tab_model, 3, 1)
 
-        layout_cfg.addLayout(form_grid)
+        layout_primary.addLayout(grid_primary)
 
-        # Status feedback label
+        h_prim_btn = QHBoxLayout()
         self.lbl_tab_status = QLabel("")
         self.lbl_tab_status.setFixedHeight(24)
         self.lbl_tab_status.setStyleSheet("font-size: 12px; font-weight: 500;")
-        self.lbl_tab_status.setWordWrap(True)
-        layout_cfg.addWidget(self.lbl_tab_status)
-
-        # Buttons bar
-        btn_bar = QHBoxLayout()
-        btn_bar.setSpacing(12)
-
-        self.btn_tab_test = QPushButton("🔌 Test Connection")
-        self.btn_tab_test.setFixedHeight(36)
-        self.btn_tab_test.setStyleSheet("background-color: #FFFFFF; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px; font-weight: 600; padding: 0 18px;")
+        self.btn_tab_test = QPushButton("🔌 Test Primary Connection")
+        self.btn_tab_test.setFixedHeight(34)
+        self.btn_tab_test.setStyleSheet("background-color: #F8FAFC; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px; font-weight: 600; padding: 0 16px;")
         self.btn_tab_test.clicked.connect(self.action_test_tab_connection)
+        h_prim_btn.addWidget(self.lbl_tab_status)
+        h_prim_btn.addStretch()
+        h_prim_btn.addWidget(self.btn_tab_test)
+        layout_primary.addLayout(h_prim_btn)
 
-        self.btn_tab_save = QPushButton("💾 Save Settings")
-        self.btn_tab_save.setFixedHeight(36)
-        self.btn_tab_save.setStyleSheet("background-color: #2563EB; color: #FFFFFF; font-weight: bold; border-radius: 6px; padding: 0 24px;")
+        layout_models.addWidget(grp_primary)
+
+        # --- GROUP 2: FALLBACK / BACKUP PROVIDER ---
+        grp_backup = QGroupBox("🥈 Fallback AI Provider (Auto-Switch on Rate Limit)")
+        grp_backup.setMaximumWidth(780)
+        grp_backup.setStyleSheet(group_style)
+        layout_backup = QVBoxLayout(grp_backup)
+        layout_backup.setContentsMargins(24, 20, 24, 20)
+        layout_backup.setSpacing(14)
+
+        self.chk_backup_enable = QCheckBox("Enable Fallback Provider (Auto-switch on 429 Rate Limit / Outage)")
+        self.chk_backup_enable.setStyleSheet("font-weight: bold; font-size: 13px; color: #1E293B;")
+        self.chk_backup_enable.setChecked(getattr(Config, "LLM_BACKUP_ENABLED", False))
+        layout_backup.addWidget(self.chk_backup_enable)
+
+        grid_backup = QGridLayout()
+        grid_backup.setVerticalSpacing(12)
+        grid_backup.setHorizontalSpacing(16)
+        grid_backup.setColumnMinimumWidth(0, 130)
+
+        grid_backup.addWidget(QLabel("Provider Preset:"), 0, 0)
+        self.cbo_backup_preset = QComboBox()
+        self.cbo_backup_preset.setFixedHeight(34)
+        self.cbo_backup_preset.addItems(list(self.LLM_PRESETS.keys()))
+        grid_backup.addWidget(self.cbo_backup_preset, 0, 1)
+
+        grid_backup.addWidget(QLabel("Base URL:"), 1, 0)
+        default_backup_url = Config.LLM_BACKUP_BASE_URL or "https://generativelanguage.googleapis.com/v1beta/openai/"
+        self.txt_backup_url = QLineEdit(default_backup_url)
+        self.txt_backup_url.setFixedHeight(34)
+        self.txt_backup_url.setPlaceholderText("https://generativelanguage.googleapis.com/v1beta/openai/")
+        grid_backup.addWidget(self.txt_backup_url, 1, 1)
+
+        grid_backup.addWidget(QLabel("API Key:"), 2, 0)
+        h_backup_key = QHBoxLayout()
+        h_backup_key.setSpacing(6)
+        self.txt_backup_key = QLineEdit(Config.LLM_BACKUP_API_KEY)
+        self.txt_backup_key.setFixedHeight(34)
+        self.txt_backup_key.setEchoMode(QLineEdit.Password)
+        self.txt_backup_key.setPlaceholderText("API key for fallback provider...")
+        self.btn_toggle_backup_key = QPushButton("👁️")
+        self.btn_toggle_backup_key.setFixedSize(38, 34)
+        self.btn_toggle_backup_key.setToolTip("Show / Hide API Key")
+        self.btn_toggle_backup_key.setStyleSheet("background-color: #F8FAFC; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px;")
+        self.btn_toggle_backup_key.clicked.connect(self.toggle_backup_key_visibility)
+        h_backup_key.addWidget(self.txt_backup_key)
+        h_backup_key.addWidget(self.btn_toggle_backup_key)
+        grid_backup.addLayout(h_backup_key, 2, 1)
+
+        grid_backup.addWidget(QLabel("Model Name:"), 3, 0)
+        default_backup_model = Config.LLM_BACKUP_MODEL or "gemini-2.5-flash"
+        self.txt_backup_model = QLineEdit(default_backup_model)
+        self.txt_backup_model.setFixedHeight(34)
+        self.txt_backup_model.setPlaceholderText("e.g. gemini-2.5-flash, deepseek-chat")
+        grid_backup.addWidget(self.txt_backup_model, 3, 1)
+
+        layout_backup.addLayout(grid_backup)
+
+        h_back_btn = QHBoxLayout()
+        self.lbl_backup_status = QLabel("")
+        self.lbl_backup_status.setFixedHeight(24)
+        self.lbl_backup_status.setStyleSheet("font-size: 12px; font-weight: 500;")
+        self.btn_backup_test = QPushButton("🔌 Test Fallback Connection")
+        self.btn_backup_test.setFixedHeight(34)
+        self.btn_backup_test.setStyleSheet("background-color: #F8FAFC; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px; font-weight: 600; padding: 0 16px;")
+        self.btn_backup_test.clicked.connect(self.action_test_backup_connection)
+        h_back_btn.addWidget(self.lbl_backup_status)
+        h_back_btn.addStretch()
+        h_back_btn.addWidget(self.btn_backup_test)
+        layout_backup.addLayout(h_back_btn)
+
+        layout_models.addWidget(grp_backup)
+
+        # Connect preset change for backup
+        self.cbo_backup_preset.currentTextChanged.connect(self.on_backup_preset_changed)
+
+        # Set initial preset dropdown selection for backup
+        if Config.LLM_BACKUP_BASE_URL:
+            for p_name, p_data in self.LLM_PRESETS.items():
+                if p_data["base_url"].rstrip("/") == Config.LLM_BACKUP_BASE_URL.rstrip("/"):
+                    self.cbo_backup_preset.setCurrentText(p_name)
+                    break
+        else:
+            self.cbo_backup_preset.setCurrentText("Google AI Studio (Gemini)")
+
+        # Function to enable/disable backup fields based on checkbox
+        def _toggle_backup_fields(enabled: bool):
+            self.cbo_backup_preset.setEnabled(enabled)
+            self.txt_backup_url.setEnabled(enabled)
+            self.txt_backup_key.setEnabled(enabled)
+            self.btn_toggle_backup_key.setEnabled(enabled)
+            self.txt_backup_model.setEnabled(enabled)
+            self.btn_backup_test.setEnabled(enabled)
+
+        self.chk_backup_enable.toggled.connect(_toggle_backup_fields)
+        _toggle_backup_fields(self.chk_backup_enable.isChecked())
+
+        # Save Button bar at bottom
+        save_box = QWidget()
+        save_box.setMaximumWidth(780)
+        h_save_bar = QHBoxLayout(save_box)
+        h_save_bar.setContentsMargins(0, 6, 0, 0)
+        self.lbl_global_save_status = QLabel("")
+        self.lbl_global_save_status.setStyleSheet("font-size: 13px; font-weight: bold; color: #16A34A;")
+
+        self.btn_tab_save = QPushButton("💾 Save All AI Settings")
+        self.btn_tab_save.setFixedHeight(40)
+        self.btn_tab_save.setStyleSheet("background-color: #2563EB; color: #FFFFFF; font-weight: bold; font-size: 13px; border-radius: 6px; padding: 0 32px;")
         self.btn_tab_save.clicked.connect(self.action_save_tab_llm_config)
 
-        btn_bar.addWidget(self.btn_tab_test)
-        btn_bar.addStretch()
-        btn_bar.addWidget(self.btn_tab_save)
-        layout_cfg.addLayout(btn_bar)
-
-        layout_models.addWidget(grp_model_cfg)
+        h_save_bar.addWidget(self.lbl_global_save_status)
+        h_save_bar.addStretch()
+        h_save_bar.addWidget(self.btn_tab_save)
+        layout_models.addWidget(save_box)
         layout_models.addStretch()
 
     def apply_styles(self):
@@ -1660,17 +1810,47 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def on_tab_preset_changed(self, preset_name: str):
         """Auto-populate fields when provider preset changes in Model Manager tab."""
+        if preset_name == "Custom Settings":
+            self.txt_tab_url.setText(Config.LLM_BASE_URL)
+            self.txt_tab_key.setText(Config.LLM_API_KEY)
+            self.txt_tab_model.setText(Config.LLM_MODEL)
+            self.lbl_tab_status.setText("")
+            return
+
         preset = self.LLM_PRESETS.get(preset_name)
         if preset:
             self.txt_tab_url.setText(preset["base_url"])
-            if preset["api_key"]:
+            if preset.get("api_key"):
                 self.txt_tab_key.setText(preset["api_key"])
+            elif Config.LLM_BASE_URL.rstrip("/") == preset["base_url"].rstrip("/"):
+                self.txt_tab_key.setText(Config.LLM_API_KEY)
+            else:
+                self.txt_tab_key.setText("")
             self.txt_tab_model.setText(preset["model"])
             self.lbl_tab_status.setText("")
 
+    @Slot(str)
+    def on_backup_preset_changed(self, preset_name: str):
+        """Auto-populate fields when backup provider preset changes."""
+        if preset_name == "Custom Settings":
+            self.lbl_backup_status.setText("")
+            return
+
+        preset = self.LLM_PRESETS.get(preset_name)
+        if preset:
+            self.txt_backup_url.setText(preset["base_url"])
+            if preset.get("api_key"):
+                self.txt_backup_key.setText(preset["api_key"])
+            elif Config.LLM_BACKUP_BASE_URL and Config.LLM_BACKUP_BASE_URL.rstrip("/") == preset["base_url"].rstrip("/"):
+                self.txt_backup_key.setText(Config.LLM_BACKUP_API_KEY)
+            else:
+                self.txt_backup_key.setText("")
+            self.txt_backup_model.setText(preset["model"])
+            self.lbl_backup_status.setText("")
+
     @Slot()
     def toggle_tab_key_visibility(self):
-        """Toggle password masking for API Key in Model Manager tab."""
+        """Toggle password masking for Primary API Key in Model Manager tab."""
         if self.txt_tab_key.echoMode() == QLineEdit.Password:
             self.txt_tab_key.setEchoMode(QLineEdit.Normal)
             self.btn_toggle_tab_key.setText("🔒")
@@ -1679,13 +1859,23 @@ class MainWindow(QMainWindow):
             self.btn_toggle_tab_key.setText("👁️")
 
     @Slot()
+    def toggle_backup_key_visibility(self):
+        """Toggle password masking for Fallback API Key."""
+        if self.txt_backup_key.echoMode() == QLineEdit.Password:
+            self.txt_backup_key.setEchoMode(QLineEdit.Normal)
+            self.btn_toggle_backup_key.setText("🔒")
+        else:
+            self.txt_backup_key.setEchoMode(QLineEdit.Password)
+            self.btn_toggle_backup_key.setText("👁️")
+
+    @Slot()
     def action_test_tab_connection(self):
-        """Test connection ping to the entered LLM endpoint."""
+        """Test connection ping to the entered Primary LLM endpoint."""
         url = self.txt_tab_url.text().strip()
         key = self.txt_tab_key.text().strip()
         model = self.txt_tab_model.text().strip()
         self.lbl_tab_status.setStyleSheet("color: #2563EB; font-size: 12px; font-weight: 500;")
-        self.lbl_tab_status.setText("⏳ Testing connection, please wait...")
+        self.lbl_tab_status.setText("⏳ Testing Primary connection, please wait...")
         QApplication.processEvents()
 
         ok, msg = test_llm_connection(url, key, model)
@@ -1697,30 +1887,84 @@ class MainWindow(QMainWindow):
             self.lbl_tab_status.setText(msg)
 
     @Slot()
+    def action_test_backup_connection(self):
+        """Test connection ping to the entered Fallback LLM endpoint."""
+        url = self.txt_backup_url.text().strip()
+        key = self.txt_backup_key.text().strip()
+        model = self.txt_backup_model.text().strip()
+        self.lbl_backup_status.setStyleSheet("color: #2563EB; font-size: 12px; font-weight: 500;")
+        self.lbl_backup_status.setText("⏳ Testing Fallback connection, please wait...")
+        QApplication.processEvents()
+
+        ok, msg = test_llm_connection(url, key, model)
+        if ok:
+            self.lbl_backup_status.setStyleSheet("color: #16A34A; font-size: 12px; font-weight: bold;")
+            self.lbl_backup_status.setText(msg)
+        else:
+            self.lbl_backup_status.setStyleSheet("color: #DC2626; font-size: 12px; font-weight: 500;")
+            self.lbl_backup_status.setText(msg)
+
+    @Slot()
     def action_save_tab_llm_config(self):
-        """Validate, save LLM configuration to .env, and synchronize UI."""
+        """Validate, save Primary & Fallback LLM configuration to .env, and synchronize UI."""
         url = self.txt_tab_url.text().strip()
         key = self.txt_tab_key.text().strip()
         model = self.txt_tab_model.text().strip()
 
         if not url:
-            QMessageBox.warning(self, "Invalid Input", "Base URL cannot be empty!")
+            QMessageBox.warning(self, "Invalid Input", "Primary Base URL cannot be empty!")
             return
         if not model:
-            QMessageBox.warning(self, "Invalid Input", "Model Name cannot be empty!")
+            QMessageBox.warning(self, "Invalid Input", "Primary Model Name cannot be empty!")
             return
 
-        Config.save_llm_config(url, key, model)
-        self.txt_model.setText(Config.LLM_MODEL)
-        self.lbl_tab_status.setStyleSheet("color: #16A34A; font-size: 12px; font-weight: bold;")
-        self.lbl_tab_status.setText("✓ Configuration saved permanently to .env!")
-        self.append_log(f"• LLM Configuration updated: Model={Config.LLM_MODEL} | Base URL={Config.LLM_BASE_URL}")
+        backup_enabled = self.chk_backup_enable.isChecked()
+        backup_url = self.txt_backup_url.text().strip()
+        backup_key = self.txt_backup_key.text().strip()
+        backup_model = self.txt_backup_model.text().strip()
 
-        QMessageBox.information(
-            self,
-            "Settings Saved",
-            f"LLM settings saved successfully!\n\n• Model: {Config.LLM_MODEL}\n• Base URL: {Config.LLM_BASE_URL}"
+        if backup_enabled:
+            if not backup_url:
+                QMessageBox.warning(self, "Invalid Input", "Fallback Base URL cannot be empty when Fallback is enabled!")
+                return
+            if not backup_model:
+                QMessageBox.warning(self, "Invalid Input", "Fallback Model Name cannot be empty when Fallback is enabled!")
+                return
+
+        Config.save_llm_config(
+            url, key, model,
+            backup_enabled=backup_enabled,
+            backup_base_url=backup_url,
+            backup_api_key=backup_key,
+            backup_model=backup_model
         )
+        self.txt_model.setText(Config.LLM_MODEL)
+
+        # Cập nhật bộ nhớ presets
+        current_preset = self.cbo_tab_preset.currentText()
+        if current_preset in self.LLM_PRESETS:
+            self.LLM_PRESETS[current_preset]["base_url"] = url
+            self.LLM_PRESETS[current_preset]["api_key"] = key
+            self.LLM_PRESETS[current_preset]["model"] = model
+        self.LLM_PRESETS["Custom Settings"]["base_url"] = url
+        self.LLM_PRESETS["Custom Settings"]["api_key"] = key
+        self.LLM_PRESETS["Custom Settings"]["model"] = model
+
+        self.lbl_global_save_status.setText("✓ All AI configurations saved permanently to .env!")
+        log_txt = f"• AI Config saved: Primary={Config.LLM_MODEL}"
+        if Config.LLM_BACKUP_ENABLED:
+            log_txt += f" | Fallback={Config.LLM_BACKUP_MODEL} (Auto-failover ON)"
+        else:
+            log_txt += " | Fallback=Disabled"
+        self.append_log(log_txt)
+
+        msg_body = f"AI model settings saved successfully!\n\n• Primary: {Config.LLM_MODEL}\n• Base URL: {Config.LLM_BASE_URL}"
+        if Config.LLM_BACKUP_ENABLED:
+            msg_body += f"\n\n• Fallback (Backup): {Config.LLM_BACKUP_MODEL}\n• Fallback URL: {Config.LLM_BACKUP_BASE_URL}\n• Auto-failover: Enabled ✓"
+        else:
+            msg_body += "\n\n• Fallback Provider: Disabled"
+
+        QMessageBox.information(self, "Settings Saved", msg_body)
 
     @Slot()
     def action_open_output_folder(self):
@@ -1926,6 +2170,7 @@ class MainWindow(QMainWindow):
             self.worker.cancel()
             self.btn_stop.setEnabled(False)
             self.lbl_stats.setText("Cancelling process...")
+            self.append_log("⏹ Stopping pipeline immediately on user request...")
         else:
             self.update_control_buttons()
 

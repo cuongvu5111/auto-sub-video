@@ -6,6 +6,7 @@ Dịch từ tiếng Trung (hoặc ngôn ngữ gốc) sang tiếng Việt với v
 import sys
 import json
 import re
+import time
 from typing import Optional, Callable, List, Dict, Any
 from config import Config
 
@@ -81,7 +82,8 @@ def translate_segments(
     target_lang: str = "Tiếng Việt",
     genre: str = "Đời sống / Mạng xã hội",
     custom_terms: str = "",
-    progress_callback: Optional[Callable[[str, float], None]] = None
+    progress_callback: Optional[Callable[[str, float], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None
 ) -> List[Dict[str, Any]]:
     """
     Gửi danh sách câu thoại sang mô hình LLM để dịch thuật và tối ưu câu thoại lồng tiếng.
@@ -93,6 +95,7 @@ def translate_segments(
         genre: Thể loại nội dung (Cổ trang, Hài hước, Công nghệ,...).
         custom_terms: Danh sách tên riêng hoặc thuật ngữ cố định.
         progress_callback: Hàm nhận (thông điệp, phần trăm tiến độ).
+        cancel_check: Hàm kiểm tra xem người dùng có yêu cầu dừng tiến trình hay không.
 
     Returns:
         List[Dict[str, Any]]: Danh sách câu thoại đã được bổ sung trường "translated_text".
@@ -105,15 +108,40 @@ def translate_segments(
     except ImportError:
         raise TranslationError("Thư viện openai chưa được cài đặt. Vui lòng chạy: pip install openai")
 
-    if progress_callback:
-        progress_callback(f"Kết nối tới mô hình LLM: {Config.LLM_MODEL}...", 10.0)
+    # Cấu hình danh sách providers (hỗ trợ chuyển đổi tự động sang Backup khi chạm Rate Limit 429)
+    providers = [
+        {
+            "name": "Primary",
+            "base_url": Config.LLM_BASE_URL,
+            "api_key": Config.LLM_API_KEY,
+            "model": Config.LLM_MODEL
+        }
+    ]
 
-    client = OpenAI(
-        base_url=Config.LLM_BASE_URL,
-        api_key=Config.LLM_API_KEY,
-        timeout=30.0,
-        max_retries=2
-    )
+    if getattr(Config, "LLM_BACKUP_ENABLED", False) and getattr(Config, "LLM_BACKUP_BASE_URL", "") and getattr(Config, "LLM_BACKUP_MODEL", ""):
+        providers.append({
+            "name": "Backup",
+            "base_url": Config.LLM_BACKUP_BASE_URL,
+            "api_key": getattr(Config, "LLM_BACKUP_API_KEY", "") or "no-key-required",
+            "model": Config.LLM_BACKUP_MODEL
+        })
+
+    clients = {}
+    for p in providers:
+        clients[p["name"]] = OpenAI(
+            base_url=p["base_url"],
+            api_key=p["api_key"] or "no-key-required",
+            timeout=getattr(Config, "LLM_TIMEOUT", 60.0),
+            max_retries=1
+        )
+
+    current_p_idx = 0
+    init_p = providers[current_p_idx]
+    if progress_callback:
+        if len(providers) > 1:
+            progress_callback(f"Khởi động dịch thuật: Primary ({init_p['model']}) + Backup ({providers[1]['model']})...", 10.0)
+        else:
+            progress_callback(f"Kết nối tới mô hình LLM: {init_p['model']}...", 10.0)
 
     # Chuẩn bị dữ liệu đầu vào gọn nhẹ cho prompt
     input_data = [
@@ -127,15 +155,19 @@ def translate_segments(
     ]
 
     system_prompt = build_system_prompt(source_lang, target_lang, genre, custom_terms)
-    chunk_size = 6
+    chunk_size = 4
     total_segments = len(segments)
     chunks = [segments[i:i + chunk_size] for i in range(0, total_segments, chunk_size)]
     translation_map = {}
 
     for c_idx, chunk in enumerate(chunks):
+        if cancel_check and cancel_check():
+            raise InterruptedError("Tiến trình dịch thuật đã bị dừng bởi người dùng.")
+
         if progress_callback:
             percent = (c_idx / len(chunks)) * 100.0
-            progress_callback(f"Translating batch {c_idx + 1}/{len(chunks)} ({len(chunk)} dialogues)...", percent)
+            active_name = providers[current_p_idx]["name"]
+            progress_callback(f"Translating batch {c_idx + 1}/{len(chunks)} ({len(chunk)} dialogues via {active_name})...", percent)
 
         input_data = [
             {
@@ -149,33 +181,82 @@ def translate_segments(
 
         user_prompt = f"Dưới đây là danh sách {len(input_data)} câu thoại cần dịch:\n" + json.dumps(input_data, ensure_ascii=False, indent=2)
 
-        try:
-            response = client.chat.completions.create(
-                model=Config.LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3,
-            )
+        max_attempts = len(providers) * 2
+        for attempt in range(max_attempts):
+            if cancel_check and cancel_check():
+                raise InterruptedError("Tiến trình dịch thuật đã bị dừng bởi người dùng.")
 
-            raw_output = response.choices[0].message.content or ""
-            cleaned_json = clean_json_response(raw_output)
-            parsed_results = json.loads(cleaned_json)
+            active_p = providers[current_p_idx]
+            active_client = clients[active_p["name"]]
 
-            for item in parsed_results:
-                if isinstance(item, dict) and "index" in item:
-                    translation_map[item["index"]] = item.get("translated_text", "").strip()
+            try:
+                response = active_client.chat.completions.create(
+                    model=active_p["model"],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.3,
+                )
 
-        except Exception as e:
-            # Thông báo cảnh báo lỗi LLM qua callback để hiển thị trên UI console
-            err_msg = str(e).replace("\n", " ")
-            if progress_callback:
-                progress_callback(f"⚠️ LLM translation error ({err_msg[:80]}). Using original text.", percent)
-            # Nếu 1 batch gặp lỗi phân tích JSON hoặc timeout thì fallback về câu gốc
-            for seg in chunk:
-                if seg["index"] not in translation_map:
-                    translation_map[seg["index"]] = seg["text"]
+                raw_output = response.choices[0].message.content or ""
+                cleaned_json = clean_json_response(raw_output)
+                parsed_results = json.loads(cleaned_json)
+
+                for item in parsed_results:
+                    if isinstance(item, dict) and "index" in item:
+                        translation_map[item["index"]] = item.get("translated_text", "").strip()
+
+                # Tự động giãn nhịp 0.5s giữa các batch để tránh va vào hạn mức TPM
+                time.sleep(0.5)
+                break
+
+            except Exception as e:
+                err_msg = str(e).replace("\n", " ")
+                is_rate_limit = any(term in err_msg.lower() for term in ["429", "rate limit", "rate_limit", "too large", "tpm"])
+
+                # Nếu có cấu hình Backup Provider: tự động switch sang Provider tiếp theo
+                if len(providers) > 1 and attempt < max_attempts - 1:
+                    next_p_idx = (current_p_idx + 1) % len(providers)
+                    next_p = providers[next_p_idx]
+                    reason = "429 Rate Limit" if is_rate_limit else "Lỗi API"
+                    if progress_callback:
+                        progress_callback(
+                            f"⚠️ {active_p['name']} ({active_p['model']}) gặp {reason}. Tự động switch sang {next_p['name']} ({next_p['model']})...",
+                            percent
+                        )
+                    current_p_idx = next_p_idx
+                    time.sleep(1.0)
+                    continue
+
+                # Nếu chỉ có 1 provider và bị rate limit: chờ thử lại theo nhịp
+                if is_rate_limit and attempt < 3:
+                    wait_sec = 6.0 * (attempt + 1)
+                    match_time = re.search(r"(?:try again in|retry after)\s+([\d\.]+)\s*s", err_msg, re.IGNORECASE)
+                    if match_time:
+                        wait_sec = max(wait_sec, float(match_time.group(1)) + 1.0)
+
+                    if progress_callback:
+                        progress_callback(
+                            f"⏳ Chạm giới hạn token (429 Rate Limit), tự động chờ {wait_sec:.1f}s trước khi thử lại batch {c_idx + 1}...",
+                            percent
+                        )
+
+                    slept = 0.0
+                    while slept < wait_sec:
+                        if cancel_check and cancel_check():
+                            raise InterruptedError("Tiến trình dịch thuật đã bị dừng bởi người dùng.")
+                        time.sleep(0.5)
+                        slept += 0.5
+                    continue
+
+                # Nếu là lỗi khác hoặc đã thử hết tất cả provider: fallback về câu gốc
+                if progress_callback:
+                    progress_callback(f"⚠️ LLM translation error ({err_msg[:80]}). Using original text.", percent)
+                for seg in chunk:
+                    if seg["index"] not in translation_map:
+                        translation_map[seg["index"]] = seg["text"]
+                break
 
     enriched_segments = []
     for seg in segments:
@@ -215,7 +296,7 @@ def test_llm_connection(base_url: str, api_key: str, model: str) -> tuple[bool, 
         client = OpenAI(
             base_url=base_url,
             api_key=api_key,
-            timeout=8.0,
+            timeout=15.0,
             max_retries=1
         )
         # Gửi ping test siêu ngắn
@@ -232,7 +313,8 @@ def test_llm_connection(base_url: str, api_key: str, model: str) -> tuple[bool, 
         if "AuthenticationError" in err_msg or "401" in err_msg:
             return False, "Authentication failed (401): Invalid API Key."
         elif "NotFoundError" in err_msg or "404" in err_msg:
-            return False, f"Model '{model}' not found (404) or invalid endpoint URL."
+            clean_err = err_msg.replace("\n", " ").strip()
+            return False, f"Model '{model}' not found (404) or invalid endpoint URL. ({clean_err[:120]})"
         elif "ConnectionError" in err_msg or "ConnectError" in err_msg:
             return False, "Failed to connect to host. Check your Base URL or network."
         return False, f"Connection error: {err_msg[:80]}"

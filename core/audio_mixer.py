@@ -7,6 +7,8 @@ và nung phụ đề .ass tùy chọn vào khung hình video.
 import sys
 import os
 import subprocess
+import time
+import threading
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Any, Union
 from config import Config
@@ -335,7 +337,8 @@ def render_final_video(
     ass_subtitle_path: Optional[Path] = None,
     watermark_options: Optional[Dict[str, Any]] = None,
     encoder: Optional[str] = None,
-    progress_callback: Optional[Callable[[str, float], None]] = None
+    progress_callback: Optional[Callable[[str, float], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None
 ) -> Path:
     """
     Đóng gói video hoàn thiện bằng FFmpeg:
@@ -402,7 +405,7 @@ def render_final_video(
             opacity = float(watermark_options.get("logo_opacity", 0.8))
             opacity = max(0.05, min(1.0, opacity))
             max_w = int(watermark_options.get("logo_max_width", 160))
-            max_w = max(40, min(800, max_w))
+            max_w = max(10, min(1920, max_w))
 
             pos_key = str(watermark_options.get("logo_position", "top-right")).lower().replace(" ", "-")
             pos_expr_map = {
@@ -465,15 +468,57 @@ def render_final_video(
             str(out_video)
         ]
 
-    try:
-        process = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
+    def run_ffmpeg_cancellable(exec_cmd):
+        proc = subprocess.Popen(
+            exec_cmd,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
-            check=True,
+            encoding="utf-8",
+            errors="replace",
             creationflags=SUBPROCESS_NO_WINDOW
         )
+
+        stderr_buffer = []
+
+        def _drain_stderr():
+            try:
+                while True:
+                    chunk = proc.stderr.read(2048)
+                    if not chunk:
+                        break
+                    stderr_buffer.append(chunk)
+                    if len(stderr_buffer) > 100:
+                        stderr_buffer.pop(0)
+            except Exception:
+                pass
+            finally:
+                if proc.stderr:
+                    try:
+                        proc.stderr.close()
+                    except Exception:
+                        pass
+
+        reader_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        reader_thread.start()
+
+        while proc.poll() is None:
+            if cancel_check and cancel_check():
+                proc.kill()
+                proc.wait()
+                reader_thread.join(timeout=1.0)
+                raise InterruptedError("Tiến trình render video đã bị dừng bởi người dùng.")
+            time.sleep(0.2)
+
+        reader_thread.join(timeout=2.0)
+
+        if proc.returncode != 0:
+            stderr_out = "".join(stderr_buffer)
+            raise subprocess.CalledProcessError(proc.returncode, exec_cmd, output="", stderr=stderr_out)
+        return proc
+
+    try:
+        run_ffmpeg_cancellable(cmd)
         if not out_video.exists() or out_video.stat().st_size == 0:
             raise AudioMixerError("Tệp video xuất ra bị rỗng hoặc không tồn tại.")
 
@@ -496,14 +541,7 @@ def render_final_video(
                         fb_cmd.append(cmd[idx])
                         idx += 1
 
-                fb_proc = subprocess.run(
-                    fb_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    check=True,
-                    creationflags=SUBPROCESS_NO_WINDOW
-                )
+                run_ffmpeg_cancellable(fb_cmd)
                 if out_video.exists() and out_video.stat().st_size > 0:
                     if progress_callback:
                         progress_callback(f"Xuất video hoàn tất (CPU Fallback): {out_video.name}", 100.0)

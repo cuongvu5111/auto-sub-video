@@ -77,6 +77,16 @@ class Config:
 
     LLM_MODEL: str = os.getenv("LLM_MODEL") or os.getenv("VNPT_LLM_MODEL", "global-llm")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("VNPT_LLM_API_KEY", "no-key-required")
+    LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "60.0"))
+
+    # Cấu hình LLM dự phòng (Fallback / Backup Provider khi chạm Rate Limit 429)
+    LLM_BACKUP_ENABLED: bool = os.getenv("LLM_BACKUP_ENABLED", "false").lower() in ("true", "1", "yes")
+    _raw_backup_url = os.getenv("LLM_BACKUP_BASE_URL", "")
+    if _raw_backup_url.endswith("/chat/completions"):
+        _raw_backup_url = _raw_backup_url[:-len("/chat/completions")]
+    LLM_BACKUP_BASE_URL: str = _raw_backup_url
+    LLM_BACKUP_API_KEY: str = os.getenv("LLM_BACKUP_API_KEY", "")
+    LLM_BACKUP_MODEL: str = os.getenv("LLM_BACKUP_MODEL", "")
 
     # Cấu hình Whisper Speech-to-Text (Mặc định 'auto' để tự động phát hiện GPU/CPU)
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
@@ -147,48 +157,70 @@ class Config:
         return capabilities
 
     @classmethod
-    def save_llm_config(cls, base_url: str, api_key: str, model: str) -> None:
+    def save_llm_config(cls, base_url: str, api_key: str, model: str,
+                        backup_enabled: bool = False,
+                        backup_base_url: str = "",
+                        backup_api_key: str = "",
+                        backup_model: str = "") -> None:
         """
-        Lưu cấu hình LLM vào tệp .env và cập nhật biến trong runtime Config.
+        Lưu cấu hình LLM chính và LLM dự phòng vào tệp .env và cập nhật biến trong runtime Config.
         """
         base_url = base_url.strip()
         if base_url.endswith("/chat/completions"):
             base_url = base_url[:-len("/chat/completions")]
 
+        backup_base_url = backup_base_url.strip()
+        if backup_base_url.endswith("/chat/completions"):
+            backup_base_url = backup_base_url[:-len("/chat/completions")]
+
         cls.LLM_BASE_URL = base_url
         cls.LLM_API_KEY = api_key.strip()
         cls.LLM_MODEL = model.strip()
+
+        cls.LLM_BACKUP_ENABLED = bool(backup_enabled)
+        cls.LLM_BACKUP_BASE_URL = backup_base_url
+        cls.LLM_BACKUP_API_KEY = backup_api_key.strip()
+        cls.LLM_BACKUP_MODEL = backup_model.strip()
 
         os.environ["LLM_BASE_URL"] = cls.LLM_BASE_URL
         os.environ["LLM_API_KEY"] = cls.LLM_API_KEY
         os.environ["LLM_MODEL"] = cls.LLM_MODEL
 
+        os.environ["LLM_BACKUP_ENABLED"] = "true" if cls.LLM_BACKUP_ENABLED else "false"
+        os.environ["LLM_BACKUP_BASE_URL"] = cls.LLM_BACKUP_BASE_URL
+        os.environ["LLM_BACKUP_API_KEY"] = cls.LLM_BACKUP_API_KEY
+        os.environ["LLM_BACKUP_MODEL"] = cls.LLM_BACKUP_MODEL
+
         env_file = cls.BASE_DIR / ".env"
         lines = []
         keys_updated = set()
 
+        val_map = {
+            "LLM_BASE_URL": cls.LLM_BASE_URL,
+            "LLM_API_KEY": cls.LLM_API_KEY,
+            "LLM_MODEL": cls.LLM_MODEL,
+            "LLM_BACKUP_ENABLED": "true" if cls.LLM_BACKUP_ENABLED else "false",
+            "LLM_BACKUP_BASE_URL": cls.LLM_BACKUP_BASE_URL,
+            "LLM_BACKUP_API_KEY": cls.LLM_BACKUP_API_KEY,
+            "LLM_BACKUP_MODEL": cls.LLM_BACKUP_MODEL,
+        }
+
         if env_file.exists():
             with open(env_file, "r", encoding="utf-8") as f:
                 for line in f:
-                    stripped = line.strip()
-                    if stripped.startswith("LLM_BASE_URL="):
-                        lines.append(f"LLM_BASE_URL={cls.LLM_BASE_URL}\n")
-                        keys_updated.add("LLM_BASE_URL")
-                    elif stripped.startswith("LLM_API_KEY="):
-                        lines.append(f"LLM_API_KEY={cls.LLM_API_KEY}\n")
-                        keys_updated.add("LLM_API_KEY")
-                    elif stripped.startswith("LLM_MODEL="):
-                        lines.append(f"LLM_MODEL={cls.LLM_MODEL}\n")
-                        keys_updated.add("LLM_MODEL")
-                    else:
+                    matched = False
+                    for k, v in val_map.items():
+                        if line.strip().startswith(f"{k}="):
+                            lines.append(f"{k}={v}\n")
+                            keys_updated.add(k)
+                            matched = True
+                            break
+                    if not matched:
                         lines.append(line)
 
-        if "LLM_BASE_URL" not in keys_updated:
-            lines.append(f"LLM_BASE_URL={cls.LLM_BASE_URL}\n")
-        if "LLM_API_KEY" not in keys_updated:
-            lines.append(f"LLM_API_KEY={cls.LLM_API_KEY}\n")
-        if "LLM_MODEL" not in keys_updated:
-            lines.append(f"LLM_MODEL={cls.LLM_MODEL}\n")
+        for k, v in val_map.items():
+            if k not in keys_updated:
+                lines.append(f"{k}={v}\n")
 
         with open(env_file, "w", encoding="utf-8") as f:
             f.writelines(lines)
