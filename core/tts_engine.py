@@ -6,6 +6,7 @@ Sử dụng edge-tts tạo giọng đọc tiếng Việt truyền cảm và FFmp
 import sys
 import os
 import re
+import time
 import asyncio
 import subprocess
 from pathlib import Path
@@ -104,10 +105,16 @@ def sanitize_tts_text(text: str) -> str:
     return cleaned
 
 
-async def synthesize_speech_async(text: str, output_file: Path, voice: str) -> bool:
+async def synthesize_speech_async(
+    text: str,
+    output_file: Path,
+    voice: str,
+    max_retries: int = 3
+) -> bool:
     """
     Hàm bất đồng bộ gọi Microsoft Edge TTS tạo giọng đọc tiếng Việt.
-    Có cơ chế tự sửa từ ngữ nhạy cảm và thử giọng thay thế khi gặp NoAudioReceived.
+    Có cơ chế tự sửa từ ngữ nhạy cảm, đa dạng hóa biến thể dấu câu,
+    luân chuyển giọng đọc Nam/Nữ và exponential backoff khi gặp NoAudioReceived/RateLimit.
     Trả về True nếu thành công, False nếu thất bại.
     """
     try:
@@ -115,7 +122,8 @@ async def synthesize_speech_async(text: str, output_file: Path, voice: str) -> b
     except ImportError:
         raise TTSError("Thư viện edge-tts chưa được cài đặt. Vui lòng chạy: pip install edge-tts")
 
-    output_file.parent.mkdir(parents=True, exist_ok=True)
+    out_path = Path(output_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     clean_text = sanitize_tts_text(text)
     if not clean_text:
         return False
@@ -125,16 +133,30 @@ async def synthesize_speech_async(text: str, output_file: Path, voice: str) -> b
     if alt_voice not in voices_to_try:
         voices_to_try.append(alt_voice)
 
-    for v in voices_to_try:
-        for candidate_text in [clean_text, clean_text + "."]:
-            try:
-                communicate = edge_tts.Communicate(candidate_text, v)
-                await communicate.save(str(output_file))
-                if output_file.exists() and output_file.stat().st_size > 0:
-                    return True
-            except Exception:
-                await asyncio.sleep(0.3)
-                continue
+    # Tập các biến thể văn bản giúp vượt qua lỗi NoAudioReceived trên dịch vụ Edge-TTS tiếng Việt
+    candidate_texts = [clean_text]
+    if not clean_text.endswith((".", "!", "?")):
+        candidate_texts.append(f"{clean_text}.")
+    else:
+        candidate_texts.append(clean_text.rstrip(".!?"))
+    candidate_texts.append(f'"{clean_text}"')
+
+    for attempt in range(max_retries):
+        for v in voices_to_try:
+            for cand in candidate_texts:
+                try:
+                    communicate = edge_tts.Communicate(cand, v)
+                    await communicate.save(str(out_path))
+                    if out_path.exists() and out_path.stat().st_size > 0:
+                        return True
+                except Exception:
+                    # Chờ ngắn trước khi thử biến thể tiếp theo
+                    await asyncio.sleep(0.2)
+                    continue
+
+        # Nếu thất bại toàn bộ biến thể trong lượt thử này, backoff trước khi sang lượt kế tiếp
+        if attempt < max_retries - 1:
+            await asyncio.sleep(0.6 * (attempt + 1))
 
     return False
 
@@ -251,11 +273,22 @@ def process_dubbing_segments(
             percent = (idx / total_segments) * 100.0
             progress_callback(f"Đang sinh giọng đọc câu {idx + 1}/{total_segments}: {text[:30]}...", percent)
 
-        # 1. Sinh âm thanh bằng edge-tts (có tự động retry và đổi giọng nếu lỗi)
-        success = asyncio.run(synthesize_speech_async(text, raw_mp3, target_voice))
-        if not success:
-            # Fallback tạo audio im lặng để video không bao giờ bị dừng giữa chừng
+        # 1. Sinh âm thanh bằng edge-tts (có tự động retry, đổi giọng và biến thể text)
+        if not text:
             generate_silence_audio(raw_mp3, target_duration)
+        else:
+            success = asyncio.run(synthesize_speech_async(text, raw_mp3, target_voice))
+            if not success:
+                # Fallback tạo audio im lặng để video không bao giờ bị dừng giữa chừng
+                generate_silence_audio(raw_mp3, target_duration)
+                if progress_callback:
+                    progress_callback(
+                        f"⚠️ [CẢNH BÁO] Không lấy được audio TTS cho câu {idx + 1}/{total_segments} (lỗi mạng/Edge-TTS timeout): '{text[:30]}...'. Đã thay bằng đoạn im lặng.",
+                        percent
+                    )
+            else:
+                # Độ trễ an toàn nhẹ (200ms) giữa các câu thành công để chống spam kết nối WebSocket tới Microsoft
+                time.sleep(0.20)
 
         # 2. Căn chỉnh tốc độ khớp thời lượng mục tiêu
         try:
