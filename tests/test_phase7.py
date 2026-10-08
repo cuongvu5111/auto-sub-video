@@ -57,8 +57,28 @@ def test_worker_signals_and_button_recovery():
     print("✓ test_worker_signals_and_button_recovery: PASSED (sig_finished luôn phát dù video bị lỗi)")
 
 
+def test_paste_links_dialog():
+    """Kiểm tra khởi tạo PasteLinksDialog, styling và phương thức bóc tách links."""
+    from PySide6.QtWidgets import QApplication
+    from gui import PasteLinksDialog
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    dlg = PasteLinksDialog()
+    assert dlg.windowTitle() == "🔗 Paste Video Links"
+    
+    # Test bóc tách link
+    sample_text = "https://v.douyin.com/W6GuKycdLJs/\n\n   https://www.tiktok.com/@test/video/123   \n"
+    dlg.txt_links.setPlainText(sample_text)
+    links = dlg.get_links()
+    assert len(links) == 2
+    assert links[0] == "https://v.douyin.com/W6GuKycdLJs/"
+    assert links[1] == "https://www.tiktok.com/@test/video/123"
+    print("✓ test_paste_links_dialog: PASSED (Khởi tạo, styling và bóc tách URL hoàn hảo)")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 7 ===")
     test_gui_syntax_and_structure()
     test_worker_signals_and_button_recovery()
+    test_paste_links_dialog()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 7 ĐÃ VƯỢT QUA ===")

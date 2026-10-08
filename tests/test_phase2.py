@@ -39,8 +39,16 @@ def test_local_video_handling():
         print("✓ test_local_video_handling: PASSED")
 
 
+def test_yt_dlp_availability():
+    """Kiểm tra thư viện yt-dlp đã được cài đặt và sẵn sàng hoạt động."""
+    import yt_dlp
+    assert hasattr(yt_dlp, "YoutubeDL")
+    print(f"✓ test_yt_dlp_availability: PASSED (Phiên bản: {yt_dlp.version.__version__})")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 2 ===")
     test_is_url()
     test_local_video_handling()
+    test_yt_dlp_availability()
     print("=== TẤT CẢ TEST ĐƠN VỊ ĐÃ VƯỢT QUA ===")
