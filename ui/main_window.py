@@ -115,7 +115,8 @@ class MainWindow(QMainWindow):
             },
             "VNPT-SI AI Gateway": {
                 "base_url": "https://llm.vnptsi.vn/v1",
-                "api_key": Config.LLM_API_KEY if ("vnptsi" in Config.LLM_BASE_URL and Config.LLM_API_KEY != "no-key-required") else "sk-FPLy2OadJQoN9haTvKjGHg",
+                # Never ship a provider credential in source; users configure their own key.
+                "api_key": Config.LLM_API_KEY if ("vnptsi" in Config.LLM_BASE_URL and Config.LLM_API_KEY != "no-key-required") else "",
                 "model": "global-llm"
             },
             "Ollama (Local - http://localhost:11434/v1)": {
@@ -210,11 +211,12 @@ class MainWindow(QMainWindow):
         self.btn_attach_srt.setFixedHeight(32)
         self.btn_remove_row = QPushButton("Remove Selected")
         self.btn_remove_row.setFixedHeight(32)
-        self.chk_only_srt = QCheckBox("Translate .srt only...")
+        self.chk_only_srt = QCheckBox("Use attached SRT only (skip Whisper)")
 
         self.btn_paste_links.clicked.connect(self.action_paste_links)
         self.btn_add_files.clicked.connect(self.action_add_files)
         self.btn_cookies.clicked.connect(self.action_manage_cookies)
+        self.btn_attach_srt.clicked.connect(self.action_attach_srt)
         self.btn_remove_row.clicked.connect(self.action_remove_selected_rows)
 
         queue_toolbar.addWidget(self.btn_paste_links)
@@ -268,7 +270,7 @@ class MainWindow(QMainWindow):
         layout_source.addWidget(QLabel("Mode:"), 0, 0)
         self.cbo_mode = QComboBox()
         self.cbo_mode.setFixedHeight(32)
-        self.cbo_mode.addItems(["Auto — detect hardcoded subtitles", "Always run STT (Whisper)"])
+        self.cbo_mode.addItems(["Prefer attached SRT; otherwise run Whisper", "Always run STT (Whisper)"])
         layout_source.addWidget(self.cbo_mode, 0, 1)
 
         layout_source.addWidget(QLabel("Source Language:"), 1, 0)
@@ -380,8 +382,8 @@ class MainWindow(QMainWindow):
         self.spn_ducking.setSingleStep(0.02)
         self.spn_ducking.setValue(Config.DEFAULT_DUCKING_VOLUME)
 
-        self.lbl_delay = QLabel("Delay:")
-        self.lbl_delay.setFixedWidth(40)
+        self.lbl_delay = QLabel("Dubbing Delay:")
+        self.lbl_delay.setFixedWidth(90)
         self.spn_delay = QDoubleSpinBox()
         self.spn_delay.setFixedHeight(32)
         self.spn_delay.setFixedWidth(85)
@@ -409,6 +411,10 @@ class MainWindow(QMainWindow):
         h_clone.addWidget(self.txt_clone)
         h_clone.addWidget(self.btn_browse_clone)
         layout_tts.addLayout(h_clone, 3, 1)
+        self.lbl_clone.setEnabled(False)
+        self.txt_clone.setEnabled(False)
+        self.btn_browse_clone.setEnabled(False)
+        self.txt_clone.setToolTip("Voice cloning is not supported by the selected Edge TTS engine.")
         right_col.addWidget(grp_tts)
 
         # Group ⑤ Export
@@ -427,6 +433,8 @@ class MainWindow(QMainWindow):
         self.chk_burn_sub = QCheckBox("Burn translated subtitles into video")
         self.chk_burn_sub.setChecked(True)
         self.chk_blur_orig = QCheckBox("Blur original subtitles")
+        self.chk_blur_orig.setEnabled(False)
+        self.chk_blur_orig.setToolTip("Subtitle blur is unavailable until a blur region can be configured.")
         h_sub_opts.addWidget(self.chk_burn_sub)
         h_sub_opts.addWidget(self.chk_blur_orig)
         h_sub_opts.addStretch()
@@ -935,6 +943,12 @@ class MainWindow(QMainWindow):
         is_running = self.worker is not None and self.worker.isRunning()
         self.btn_stop.setEnabled(is_running)
         self.btn_run.setEnabled(not is_running and self.table_queue.rowCount() > 0)
+        for widget in (
+            self.btn_paste_links, self.btn_add_files, self.btn_cookies,
+            self.btn_attach_srt, self.btn_remove_row, self.chk_only_srt,
+            self.table_queue,
+        ):
+            widget.setEnabled(not is_running)
 
     @Slot()
     def action_paste_links(self):
@@ -946,9 +960,14 @@ class MainWindow(QMainWindow):
                 for link in links:
                     row = self.table_queue.rowCount()
                     self.table_queue.insertRow(row)
-                    self.table_queue.setItem(row, 0, QTableWidgetItem(link))
-                    self.table_queue.setItem(row, 1, QTableWidgetItem("-"))
+                    source_item = QTableWidgetItem(link)
+                    source_item.setFlags(source_item.flags() & ~Qt.ItemIsEditable)
+                    self.table_queue.setItem(row, 0, source_item)
+                    subtitle_item = QTableWidgetItem("-")
+                    subtitle_item.setFlags(subtitle_item.flags() & ~Qt.ItemIsEditable)
+                    self.table_queue.setItem(row, 1, subtitle_item)
                     item_status = QTableWidgetItem("Queued")
+                    item_status.setFlags(item_status.flags() & ~Qt.ItemIsEditable)
                     item_status.setForeground(QColor("#7F8C8D"))
                     self.table_queue.setItem(row, 2, item_status)
                 self.lbl_stats.setText(f"{self.table_queue.rowCount()} video(s) in queue")
@@ -967,13 +986,52 @@ class MainWindow(QMainWindow):
             for file_path in files:
                 row = self.table_queue.rowCount()
                 self.table_queue.insertRow(row)
-                self.table_queue.setItem(row, 0, QTableWidgetItem(file_path))
-                self.table_queue.setItem(row, 1, QTableWidgetItem("-"))
+                source_item = QTableWidgetItem(file_path)
+                source_item.setFlags(source_item.flags() & ~Qt.ItemIsEditable)
+                self.table_queue.setItem(row, 0, source_item)
+                subtitle_item = QTableWidgetItem("-")
+                subtitle_item.setFlags(subtitle_item.flags() & ~Qt.ItemIsEditable)
+                self.table_queue.setItem(row, 1, subtitle_item)
                 item_status = QTableWidgetItem("Queued")
+                item_status.setFlags(item_status.flags() & ~Qt.ItemIsEditable)
                 item_status.setForeground(QColor("#7F8C8D"))
                 self.table_queue.setItem(row, 2, item_status)
             self.lbl_stats.setText(f"{self.table_queue.rowCount()} video(s) in queue")
             self.update_control_buttons()
+
+    @Slot()
+    def action_attach_srt(self):
+        """Attach one validated SRT path to each selected video row."""
+        selected_rows = sorted({index.row() for index in self.table_queue.selectedIndexes()})
+        if not selected_rows:
+            QMessageBox.warning(self, "Attach subtitles", "Select one or more video rows first.")
+            return
+
+        files, _ = QFileDialog.getOpenFileNames(self, "Select SRT Files", "", "Subtitles (*.srt)")
+        if not files:
+            return
+        if len(files) != len(selected_rows):
+            QMessageBox.warning(
+                self,
+                "Attach subtitles",
+                "Select exactly one SRT file per selected video row. Select one video row to attach a single file.",
+            )
+            return
+
+        from core.subtitles import parse_srt, SubtitleFileError
+        try:
+            for srt_path in files:
+                parse_srt(srt_path)
+        except SubtitleFileError as exc:
+            QMessageBox.warning(self, "Invalid SRT", str(exc))
+            return
+
+        for row, srt_path in zip(selected_rows, files):
+            item = QTableWidgetItem(Path(srt_path).name)
+            item.setData(Qt.UserRole, str(Path(srt_path).resolve()))
+            item.setToolTip(str(Path(srt_path).resolve()))
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            self.table_queue.setItem(row, 1, item)
 
     @Slot()
     def action_remove_selected_rows(self):
@@ -1321,8 +1379,8 @@ class MainWindow(QMainWindow):
         self.cbo_voice.setEnabled(enabled)
         self.spn_ducking.setEnabled(enabled)
         self.spn_delay.setEnabled(enabled)
-        self.txt_clone.setEnabled(enabled)
-        self.btn_browse_clone.setEnabled(enabled)
+        self.txt_clone.setEnabled(False)
+        self.btn_browse_clone.setEnabled(False)
         self.lbl_voice.setEnabled(enabled)
         self.lbl_vol_delay.setEnabled(enabled)
         self.lbl_clone.setEnabled(enabled)
@@ -1465,15 +1523,18 @@ class MainWindow(QMainWindow):
         for row in range(count):
             status_item = self.table_queue.item(row, 2)
             status_text = status_item.text() if status_item else ""
-            if not status_text.startswith("✓ Done"):
+            if not status_text.startswith(("✓ Done", "⚠ Done with warnings")):
                 pending_rows.append(row)
 
         target_rows = pending_rows if pending_rows else list(range(count))
 
         tasks = []
         for row in target_rows:
-            source = self.table_queue.item(row, 0).text().strip()
-            tasks.append({"row": row, "source": source})
+            source_item = self.table_queue.item(row, 0)
+            source = source_item.text().strip() if source_item else ""
+            subtitle_item = self.table_queue.item(row, 1)
+            subtitle_path = subtitle_item.data(Qt.UserRole) if subtitle_item else None
+            tasks.append({"row": row, "source": source, "subtitle_path": subtitle_path})
 
         selected_lang_text = self.cbo_lang.currentText().lower()
         if "zh" in selected_lang_text:
@@ -1514,11 +1575,20 @@ class MainWindow(QMainWindow):
             "watermark_options": watermark_options,
             "encoder": encoder_key,
             "enable_dubbing": self.chk_enable_dubbing.isChecked(),
+            "prefer_attached_subtitle": self.cbo_mode.currentIndex() == 0,
+            "translate_srt_only": self.chk_only_srt.isChecked(),
+            "delay_offset": self.spn_delay.value(),
             "output_dir": Path(self.txt_output_dir.text()).resolve()
         }
 
         self.btn_run.setEnabled(False)
         self.btn_stop.setEnabled(True)
+        for widget in (
+            self.btn_paste_links, self.btn_add_files, self.btn_cookies,
+            self.btn_attach_srt, self.btn_remove_row, self.chk_only_srt,
+            self.table_queue,
+        ):
+            widget.setEnabled(False)
         self.progress_bar.setValue(0)
         self.lbl_stats.setText(f"Processing 0/{len(tasks)} video(s)...")
 
@@ -1538,7 +1608,7 @@ class MainWindow(QMainWindow):
             self.worker.cancel()
             self.btn_stop.setEnabled(False)
             self.lbl_stats.setText("Cancelling process...")
-            self.append_log("⏹ Stopping pipeline immediately on user request...")
+            self.append_log("⏹ Cancellation requested. Active operations will stop at the next safe point...")
         else:
             self.update_control_buttons()
 

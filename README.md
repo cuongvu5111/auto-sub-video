@@ -63,12 +63,24 @@ pip install -r requirements.txt
 ```bash
 copy .env.example .env
 ```
+Keep `.env` local; it is ignored by Git. You can also enter provider settings in the Model Manager tab. For a hosted provider, add your own API key. Ollama can use a local endpoint without a hosted API key. Never commit provider credentials.
+
 Edit `.env` with your LLM provider details:
 ```env
 LLM_BASE_URL=http://localhost:11434/v1
 LLM_MODEL=gemma3:4b
 LLM_API_KEY=your_api_key_here
 ```
+
+### Video processing behavior
+
+* The pipeline validates the video and audio streams before transcription. Attaching an SRT allows videos without source audio to skip Whisper.
+* “Prefer attached SRT; otherwise run Whisper” uses the selected row's attached file. “Use attached SRT only (skip Whisper)” requires an SRT for every queued video.
+* If translation fails, source audio is restored for that dialogue when available. If TTS or audio synchronization fails, the original dialogue is restored when possible; otherwise the interval is silent. The job log marks these results as warnings.
+* Dubbing delay shifts the translated subtitle and voice together. Segments that fall outside the video are clipped or omitted with a warning.
+* Temporary job files are isolated and removed after each job. Set `KEEP_INTERMEDIATES=true` in `.env` to retain them for debugging.
+* Existing outputs are preserved. A new render receives a numbered filename when the requested name already exists, and is published only after stream and duration validation.
+* Stop requests cancel active FFmpeg work and are checked between network and media operations. A provider request currently in flight can take up to its configured timeout to return.
 
 **4. Launch the application**
 
@@ -101,11 +113,11 @@ dist/AutoDubStudio-v1.0.1-windows-x64.zip   ← Upload to GitHub Releases
 
 ## 🧪 Test Suite
 
-Run the full automated test suite (Phases 2 through 7):
+Run the full automated test suite:
 ```bash
 python tests/run_all_tests.py
 ```
-Expected result: **6/6 tests passing**.
+Expected result: **7/7 test modules passing**. The yt-dlp availability check and live Edge TTS test are optional and may report skipped unless dependencies/network are enabled. Set `AUTOSUB_RUN_LIVE_TTS_TESTS=1` only when you want the live TTS check.
 
 ---
 
@@ -117,6 +129,7 @@ Expected result: **6/6 tests passing**.
 | [`AGENTS.md`](AGENTS.md) | AI coding agent development guidelines |
 | [`docs/RELEASE_NOTES_v1.0.1.md`](docs/RELEASE_NOTES_v1.0.1.md) | Changelog and release details for v1.0.1 |
 | [`docs/implementation_plan.md`](docs/implementation_plan.md) | 8-Phase implementation roadmap and checklist |
+| [`docs/reliability_improvement_plan.md`](docs/reliability_improvement_plan.md) | Phased reliability work, progress, and remaining verification |
 
 ---
 

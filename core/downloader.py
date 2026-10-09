@@ -23,7 +23,8 @@ def is_url(path_or_url: str) -> bool:
 def download_video(
     source: str,
     output_dir: Optional[Path] = None,
-    progress_callback: Optional[Callable[[str, float], None]] = None
+    progress_callback: Optional[Callable[[str, float], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None
 ) -> Path:
     """
     Tải video từ URL hoặc xác thực tệp video cục bộ.
@@ -63,6 +64,8 @@ def download_video(
 
     # Hook theo dõi tiến độ tải về
     def ydl_hook(d):
+        if cancel_check and cancel_check():
+            raise InterruptedError("The download was cancelled by the user.")
         if d.get("status") == "downloading" and progress_callback:
             total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             downloaded = d.get("downloaded_bytes") or 0
@@ -78,6 +81,10 @@ def download_video(
         "outtmpl": output_template,
         "quiet": True,
         "no_warnings": True,
+        "socket_timeout": 20,
+        "retries": 2,
+        "fragment_retries": 2,
+        "extractor_retries": 2,
         "progress_hooks": [ydl_hook],
         # Thêm user-agent giả lập trình duyệt để tránh bị chặn IP
         "http_headers": {
@@ -118,6 +125,8 @@ def download_video(
 
             return downloaded_path.resolve()
 
+    except InterruptedError:
+        raise
     except Exception as e:
         err_msg = str(e)
         if "Fresh cookies" in err_msg or "403" in err_msg:

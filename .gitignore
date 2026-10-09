@@ -16,6 +16,7 @@ ENV/
 
 # Tệp tin tạm thời trong quá trình xử lý audio/video
 temp/
+output/
 *.mp4
 *.mp3
 *.wav

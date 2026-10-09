@@ -23,6 +23,23 @@ BIN_FFMPEG = ROOT_DIR / "bin" / "ffmpeg.exe"
 ASSETS_DIR = ROOT_DIR / "assets"
 
 
+def remove_conflicting_icu_binaries(dist_path: Path) -> list[str]:
+    """Remove unrelated bundled ICU DLLs that can break PySide6 on Windows.
+
+    PyInstaller can collect ICU binaries from other tools on the build machine
+    (for example Poppler). Those DLLs export version-suffixed symbols and can
+    shadow Windows' ICU runtime, while Qt imports the unversioned Windows ABI.
+    """
+    removed = []
+    for runtime_dir in (dist_path, dist_path / "_internal"):
+        if not runtime_dir.is_dir():
+            continue
+        for candidate in runtime_dir.glob("icu*.dll"):
+            candidate.unlink()
+            removed.append(candidate.name)
+    return removed
+
+
 def check_pyinstaller():
     """Kiểm tra và cài đặt PyInstaller nếu chưa có."""
     try:
@@ -66,6 +83,7 @@ def build_application():
         "--hidden-import=dotenv",
         "--hidden-import=yt_dlp",
         "--hidden-import=av",
+        "--hidden-import=core.runtime_check",
         str(ENTRY_POINT)
     ]
 
@@ -79,6 +97,10 @@ def build_application():
         dist_path = ROOT_DIR / "dist" / "AutoDubStudio"
         exe_path = dist_path / "AutoDubStudio.exe"
         zip_archive_base = ROOT_DIR / "dist" / "AutoDubStudio-v1.0.1-windows-x64"
+
+        removed_icu = remove_conflicting_icu_binaries(dist_path)
+        if removed_icu:
+            print("Removed incompatible host ICU runtime files: " + ", ".join(sorted(removed_icu)))
 
         # Đảm bảo các tệp phụ trợ nằm ngay cạnh file .exe để tiện sử dụng
         if BIN_FFMPEG.exists():

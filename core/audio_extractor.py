@@ -7,11 +7,9 @@ import sys
 import subprocess
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from config import Config
-
-# Cờ ẩn cửa sổ console phụ trên Windows khi chạy FFmpeg
-SUBPROCESS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+from core.process import run_process
 
 
 class AudioExtractionError(Exception):
@@ -55,7 +53,8 @@ def find_ffmpeg() -> str:
 def extract_audio(
     video_path: Path | str,
     output_wav_path: Optional[Path | str] = None,
-    sample_rate: int = 16000
+    sample_rate: int = 16000,
+    cancel_check: Optional[Callable[[], bool]] = None
 ) -> Path:
     """
     Trích xuất âm thanh từ video sang định dạng WAV 16kHz Mono.
@@ -95,18 +94,20 @@ def extract_audio(
     ]
 
     try:
-        result = subprocess.run(
+        result = run_process(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            timeout=Config.FFMPEG_TIMEOUT,
+            cancel_check=cancel_check,
             check=True,
-            creationflags=SUBPROCESS_NO_WINDOW
         )
         if not target_wav.exists() or target_wav.stat().st_size == 0:
             raise AudioExtractionError("Tệp âm thanh sinh ra bị rỗng hoặc không tồn tại.")
         return target_wav
 
+    except InterruptedError:
+        raise
+    except TimeoutError as e:
+        raise AudioExtractionError(str(e)) from e
     except subprocess.CalledProcessError as e:
         error_msg = e.stderr[-500:] if e.stderr else str(e)
         raise AudioExtractionError(f"Lỗi khi trích xuất âm thanh bằng FFmpeg: {error_msg}") from e

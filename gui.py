@@ -8,6 +8,9 @@ Facade re-exporting all core UI components, dialogs, and background workers.
 """
 
 import sys
+import argparse
+import json
+from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 # Backward-compatible Re-exports
@@ -34,14 +37,31 @@ __all__ = [
 
 def main():
     """Main application launcher."""
+    if len(sys.argv) > 1 and sys.argv[1] == "--runtime-self-check":
+        parser = argparse.ArgumentParser(description="Check a frozen AutoDub Studio runtime")
+        parser.add_argument("--runtime-self-check", dest="input_video", required=True, type=Path)
+        parser.add_argument("--expect-llm-model")
+        parser.add_argument("--report-json", type=Path)
+        args = parser.parse_args()
+        from core.runtime_check import run_runtime_self_check
+
+        report = run_runtime_self_check(args.input_video, args.expect_llm_model)
+        rendered = json.dumps(report, ensure_ascii=False, indent=2)
+        if args.report_json:
+            args.report_json.parent.mkdir(parents=True, exist_ok=True)
+            args.report_json.write_text(rendered, encoding="utf-8")
+        if sys.stdout is not None:
+            print(rendered)
+        return 0
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     window = MainWindow()
     # Apply stylesheet to whole QApplication for crisp rendering across all dialogs and modals
     app.setStyleSheet(window.styleSheet())
     window.show()
-    sys.exit(app.exec())
+    return app.exec()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

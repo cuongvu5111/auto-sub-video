@@ -3,6 +3,8 @@ Kiểm thử cho Phase 6: Module Audio Mixer, Subtitle Generator & Pipeline.
 """
 
 import sys
+import subprocess
+import tempfile
 from pathlib import Path
 
 # Cấu hình encoding UTF-8 cho console Windows
@@ -186,6 +188,157 @@ def test_render_final_video_preserve_original_audio():
     print("✓ test_render_final_video_preserve_original_audio: PASSED (Giữ trọn vẹn track âm thanh gốc)")
 
 
+def test_audio_mix_pads_short_background_to_video_duration():
+    """A short source audio stream must not clip a late dubbed segment or the video tail."""
+    from pydub import AudioSegment
+    from core.audio_mixer import create_mixed_audio_track
+    from core.audio_extractor import find_ffmpeg
+
+    ffmpeg_bin = find_ffmpeg()
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    with tempfile.TemporaryDirectory(prefix="mixer_duration_", dir=str(root_dir / "temp")) as tmp:
+        temp_dir = Path(tmp)
+        original = temp_dir / "short_background.wav"
+        dubbed = temp_dir / "late_dub.wav"
+        mixed = temp_dir / "mixed.wav"
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "0.4", "-c:a", "pcm_s16le", str(original)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=creationflags
+        )
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=0.25", "-c:a", "pcm_s16le", str(dubbed)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=creationflags
+        )
+        create_mixed_audio_track(
+            original,
+            [{"index": 0, "start": 0.9, "end": 1.15, "dubbed_audio_path": str(dubbed)}],
+            mixed,
+            ducking_volume=0.0,
+            total_duration=1.2,
+        )
+        result = AudioSegment.from_file(mixed, format="wav")
+        assert abs(len(result) - 1200) <= 1
+        assert result[950:1100].rms > 0, "Late dubbed audio was clipped from the mix"
+
+    print("✓ test_audio_mix_pads_short_background_to_video_duration: PASSED")
+
+
+def test_chunked_audio_mix_preserves_boundary_timing_and_source_fallback():
+    """Audio placed across a 10-second chunk boundary must retain timing and fallback policy."""
+    from pydub import AudioSegment
+    from core.audio_mixer import create_mixed_audio_track
+    from core.audio_extractor import find_ffmpeg
+
+    ffmpeg_bin = find_ffmpeg()
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    with tempfile.TemporaryDirectory(prefix="mixer_chunks_", dir=str(root_dir / "temp")) as tmp:
+        temp_dir = Path(tmp)
+        original = temp_dir / "original.wav"
+        dubbed = temp_dir / "dubbed.wav"
+        mixed = temp_dir / "mixed.wav"
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=24000:duration=12", "-c:a", "pcm_s16le", str(original)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=creationflags,
+        )
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=24000:duration=0.5", "-c:a", "pcm_s16le", str(dubbed)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=creationflags,
+        )
+
+        create_mixed_audio_track(
+            original,
+            [
+                {"index": 0, "start": 9.8, "end": 10.3, "dubbed_audio_path": str(dubbed), "dubbed_duration": 0.5},
+                {
+                    "index": 1, "start": 10.4, "end": 10.8, "dubbed_audio_path": str(dubbed),
+                    "dubbed_duration": 0.4, "tts_status": "translation_fallback_source_audio",
+                },
+            ],
+            mixed,
+            ducking_volume=0.0,
+            total_duration=12.0,
+        )
+
+        result = AudioSegment.from_file(mixed, format="wav")
+        assert abs(len(result) - 12000) <= 1
+        assert result[9850:10150].rms > 0, "Dubbed speech crossing the chunk boundary was lost"
+        assert result[10400:10800].rms > 0, "Source-audio fallback crossing the chunk boundary was lost"
+        assert result[11000:11500].rms == 0, "Ducked background leaked into a silent dubbing gap"
+
+    print("✓ test_chunked_audio_mix_preserves_boundary_timing_and_source_fallback: PASSED")
+
+
+def test_short_source_audio_keeps_full_video_and_late_dub_after_render():
+    """Exercise short-source audio padding through mixing, encoding, and validation."""
+    from pydub import AudioSegment
+    from core.audio_mixer import create_mixed_audio_track, generate_ass_file, render_final_video
+    from core.audio_extractor import find_ffmpeg
+    import av
+
+    ffmpeg_bin = find_ffmpeg()
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    temp_root = root_dir / "temp"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="tail_render_", dir=str(temp_root)) as tmp:
+        temp_dir = Path(tmp)
+        source_video = temp_dir / "source.mp4"
+        source_audio = temp_dir / "source_audio.wav"
+        dubbed_audio = temp_dir / "late_dub.wav"
+        mixed_audio = temp_dir / "mixed.wav"
+        output_video = temp_dir / "final.mp4"
+        subtitle_file = temp_dir / "captions.ass"
+
+        subprocess.run(
+            [
+                ffmpeg_bin, "-y",
+                "-f", "lavfi", "-i", "color=c=black:s=320x240:r=25:d=1.2",
+                "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=24000",
+                "-filter_complex", "[1:a]atrim=duration=0.4[a]",
+                "-map", "0:v:0", "-map", "[a]", "-t", "1.2",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                str(source_video),
+            ],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=creationflags
+        )
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-i", str(source_video), "-map", "0:a:0", "-vn", "-c:a", "pcm_s16le", str(source_audio)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=creationflags
+        )
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=0.25", "-c:a", "pcm_s16le", str(dubbed_audio)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=creationflags
+        )
+        create_mixed_audio_track(
+            source_audio,
+            [{"index": 0, "start": 0.9, "end": 1.15, "dubbed_audio_path": str(dubbed_audio)}],
+            mixed_audio,
+            ducking_volume=0.0,
+            total_duration=1.2,
+        )
+        generate_ass_file(
+            [{"start": 0.1, "end": 1.0, "translated_text": "Vietnamese subtitle"}],
+            subtitle_file,
+        )
+        first_output = render_final_video(
+            source_video, mixed_audio, output_video,
+            ass_subtitle_path=subtitle_file,
+            encoder="libx264",
+        )
+        second_output = render_final_video(source_video, mixed_audio, output_video, encoder="libx264")
+
+        assert first_output != second_output
+        assert first_output.exists() and second_output.exists()
+        with av.open(str(first_output)) as container:
+            assert abs(float(container.duration / av.time_base) - 1.2) <= 0.15
+            assert len(container.streams.video) == 1
+            assert len(container.streams.audio) == 1
+        rendered_audio = AudioSegment.from_file(first_output, format="mp4")
+        assert len(rendered_audio) >= 1150
+        assert rendered_audio[950:1100].rms > 0, "Late dubbed audio disappeared during final render"
+
+    print("✓ test_short_source_audio_keeps_full_video_and_late_dub_after_render: PASSED")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 6 ===")
     test_ass_timestamp_formatting()
@@ -196,5 +349,8 @@ if __name__ == "__main__":
     test_ass_text_watermark()
     test_hardware_capabilities_detection()
     test_render_final_video_preserve_original_audio()
+    test_audio_mix_pads_short_background_to_video_duration()
+    test_chunked_audio_mix_preserves_boundary_timing_and_source_fallback()
+    test_short_source_audio_keeps_full_video_and_late_dub_after_render()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 6 ĐÃ VƯỢT QUA ===")
 

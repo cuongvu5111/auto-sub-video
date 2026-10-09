@@ -24,6 +24,16 @@ class TranslationError(Exception):
     pass
 
 
+def _sleep_with_cancel(duration: float, cancel_check: Optional[Callable[[], bool]]) -> None:
+    slept = 0.0
+    while slept < duration:
+        if cancel_check and cancel_check():
+            raise InterruptedError("The translation was cancelled by the user.")
+        step = min(0.1, duration - slept)
+        time.sleep(step)
+        slept += step
+
+
 def clean_json_response(raw_text: str) -> str:
     """
     Trích xuất và làm sạch chuỗi JSON từ phản hồi của LLM (loại bỏ markdown fence nếu có).
@@ -83,7 +93,8 @@ def translate_segments(
     genre: str = "Đời sống / Mạng xã hội",
     custom_terms: str = "",
     progress_callback: Optional[Callable[[str, float], None]] = None,
-    cancel_check: Optional[Callable[[], bool]] = None
+    cancel_check: Optional[Callable[[], bool]] = None,
+    batch_size: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Gửi danh sách câu thoại sang mô hình LLM để dịch thuật và tối ưu câu thoại lồng tiếng.
@@ -96,12 +107,25 @@ def translate_segments(
         custom_terms: Danh sách tên riêng hoặc thuật ngữ cố định.
         progress_callback: Hàm nhận (thông điệp, phần trăm tiến độ).
         cancel_check: Hàm kiểm tra xem người dùng có yêu cầu dừng tiến trình hay không.
+        batch_size: Số câu tối đa gửi trong một request; mặc định lấy từ Config.
 
     Returns:
         List[Dict[str, Any]]: Danh sách câu thoại đã được bổ sung trường "translated_text".
     """
     if not segments:
         return []
+
+    configured_batch_size = batch_size if batch_size is not None else getattr(Config, "LLM_TRANSLATION_BATCH_SIZE", 4)
+    if isinstance(configured_batch_size, bool) or not isinstance(configured_batch_size, (int, str)):
+        raise ValueError("LLM translation batch size must be an integer between 1 and 32.")
+    try:
+        chunk_size = int(configured_batch_size)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("LLM translation batch size must be an integer between 1 and 32.") from exc
+    if isinstance(configured_batch_size, str) and not configured_batch_size.strip().lstrip("+").isdigit():
+        raise ValueError("LLM translation batch size must be an integer between 1 and 32.")
+    if not 1 <= chunk_size <= 32:
+        raise ValueError("LLM translation batch size must be an integer between 1 and 32.")
 
     try:
         from openai import OpenAI
@@ -143,31 +167,24 @@ def translate_segments(
         else:
             progress_callback(f"Kết nối tới mô hình LLM: {init_p['model']}...", 10.0)
 
-    # Chuẩn bị dữ liệu đầu vào gọn nhẹ cho prompt
-    input_data = [
-        {
-            "index": seg["index"],
-            "start": seg["start"],
-            "end": seg["end"],
-            "text": seg["text"]
-        }
-        for seg in segments
-    ]
-
     system_prompt = build_system_prompt(source_lang, target_lang, genre, custom_terms)
-    chunk_size = 4
     total_segments = len(segments)
-    chunks = [segments[i:i + chunk_size] for i in range(0, total_segments, chunk_size)]
+    pending_chunks = [segments[i:i + chunk_size] for i in range(0, total_segments, chunk_size)]
     translation_map = {}
+    source_fallback_indexes = set()
+    completed_segments = 0
+    batch_number = 0
 
-    for c_idx, chunk in enumerate(chunks):
+    while pending_chunks:
         if cancel_check and cancel_check():
             raise InterruptedError("Tiến trình dịch thuật đã bị dừng bởi người dùng.")
 
+        chunk = pending_chunks.pop(0)
+        batch_number += 1
+        percent = (completed_segments / total_segments) * 100.0
         if progress_callback:
-            percent = (c_idx / len(chunks)) * 100.0
             active_name = providers[current_p_idx]["name"]
-            progress_callback(f"Translating batch {c_idx + 1}/{len(chunks)} ({len(chunk)} dialogues via {active_name})...", percent)
+            progress_callback(f"Translating batch {batch_number} ({len(chunk)} dialogues via {active_name})...", percent)
 
         input_data = [
             {
@@ -198,22 +215,53 @@ def translate_segments(
                     ],
                     temperature=0.3,
                 )
+                if cancel_check and cancel_check():
+                    raise InterruptedError("The translation was cancelled by the user.")
 
                 raw_output = response.choices[0].message.content or ""
                 cleaned_json = clean_json_response(raw_output)
                 parsed_results = json.loads(cleaned_json)
 
-                for item in parsed_results:
-                    if isinstance(item, dict) and "index" in item:
-                        translation_map[item["index"]] = item.get("translated_text", "").strip()
+                if not isinstance(parsed_results, list):
+                    raise ValueError("LLM response must be a JSON list.")
 
-                # Tự động giãn nhịp 0.5s giữa các batch để tránh va vào hạn mức TPM
-                time.sleep(0.5)
+                expected_indexes = {seg["index"] for seg in chunk}
+                chunk_translations = {}
+                for item in parsed_results:
+                    if not isinstance(item, dict) or "index" not in item:
+                        raise ValueError("LLM response contains an invalid segment entry.")
+                    seg_index = item["index"]
+                    translated_text = item.get("translated_text")
+                    if seg_index not in expected_indexes:
+                        raise ValueError(f"LLM returned an unknown segment index: {seg_index}.")
+                    if seg_index in chunk_translations:
+                        raise ValueError(f"LLM returned duplicate segment index: {seg_index}.")
+                    if not isinstance(translated_text, str) or not translated_text.strip():
+                        raise ValueError(f"LLM returned empty text for segment {seg_index}.")
+                    chunk_translations[seg_index] = translated_text.strip()
+
+                missing_indexes = expected_indexes.difference(chunk_translations)
+                if missing_indexes:
+                    raise ValueError(f"LLM response is missing segment indexes: {sorted(missing_indexes)}.")
+
+                if pending_chunks:
+                    # Keep a short pause between requests to reduce provider rate-limit pressure.
+                    _sleep_with_cancel(0.5, cancel_check)
+                translation_map.update(chunk_translations)
+                completed_segments += len(chunk)
                 break
 
+            except InterruptedError:
+                raise
             except Exception as e:
                 err_msg = str(e).replace("\n", " ")
-                is_rate_limit = any(term in err_msg.lower() for term in ["429", "rate limit", "rate_limit", "too large", "tpm"])
+                normalized_error = err_msg.lower()
+                is_batch_size_error = any(term in normalized_error for term in (
+                    "too large", "context length", "context_length", "maximum context",
+                    "prompt is too long", "too many tokens", "413",
+                ))
+                is_timeout_error = "timeout" in normalized_error or "timed out" in normalized_error
+                is_rate_limit = any(term in normalized_error for term in ("429", "rate limit", "rate_limit", "tpm"))
 
                 # Nếu có cấu hình Backup Provider: tự động switch sang Provider tiếp theo
                 if len(providers) > 1 and attempt < max_attempts - 1:
@@ -226,19 +274,19 @@ def translate_segments(
                             percent
                         )
                     current_p_idx = next_p_idx
-                    time.sleep(1.0)
+                    _sleep_with_cancel(1.0, cancel_check)
                     continue
 
                 # Nếu chỉ có 1 provider và bị rate limit: chờ thử lại theo nhịp
-                if is_rate_limit and attempt < 3:
+                if is_rate_limit and attempt < max_attempts - 1:
                     wait_sec = 6.0 * (attempt + 1)
                     match_time = re.search(r"(?:try again in|retry after)\s+([\d\.]+)\s*s", err_msg, re.IGNORECASE)
                     if match_time:
-                        wait_sec = max(wait_sec, float(match_time.group(1)) + 1.0)
+                        wait_sec = min(60.0, max(wait_sec, float(match_time.group(1)) + 1.0))
 
                     if progress_callback:
                         progress_callback(
-                            f"⏳ Chạm giới hạn token (429 Rate Limit), tự động chờ {wait_sec:.1f}s trước khi thử lại batch {c_idx + 1}...",
+                            f"⏳ Chạm giới hạn token (429 Rate Limit), tự động chờ {wait_sec:.1f}s trước khi thử lại batch {batch_number}...",
                             percent
                         )
 
@@ -246,23 +294,50 @@ def translate_segments(
                     while slept < wait_sec:
                         if cancel_check and cancel_check():
                             raise InterruptedError("Tiến trình dịch thuật đã bị dừng bởi người dùng.")
-                        time.sleep(0.5)
-                        slept += 0.5
+                        time.sleep(0.1)
+                        slept += 0.1
                     continue
 
-                # Nếu là lỗi khác hoặc đã thử hết tất cả provider: fallback về câu gốc
+                # Retry an invalid/oversized response with smaller chunks before falling back.
+                if len(chunk) > 1 and (
+                    is_batch_size_error
+                    or is_timeout_error
+                    or isinstance(e, (ValueError, IndexError))
+                ):
+                    midpoint = len(chunk) // 2
+                    pending_chunks[0:0] = [chunk[:midpoint], chunk[midpoint:]]
+                    if progress_callback:
+                        progress_callback(
+                            f"⚠️ LLM could not return a valid response for {len(chunk)} dialogues; retrying as smaller batches.",
+                            percent,
+                        )
+                    break
+
+                # If this chunk cannot be recovered, keep its source speech visible in the result.
                 if progress_callback:
                     progress_callback(f"⚠️ LLM translation error ({err_msg[:80]}). Using original text.", percent)
                 for seg in chunk:
                     if seg["index"] not in translation_map:
                         translation_map[seg["index"]] = seg["text"]
+                        source_fallback_indexes.add(seg["index"])
+                completed_segments += len(chunk)
                 break
 
     enriched_segments = []
     for seg in segments:
         seg_copy = dict(seg)
-        seg_copy["translated_text"] = translation_map.get(seg["index"], seg["text"]).strip()
+        if seg["index"] not in translation_map:
+            translation_map[seg["index"]] = seg["text"]
+            source_fallback_indexes.add(seg["index"])
+        seg_copy["translated_text"] = translation_map[seg["index"]].strip()
+        seg_copy["translation_status"] = "source_fallback" if seg["index"] in source_fallback_indexes else "translated"
         enriched_segments.append(seg_copy)
+
+    if source_fallback_indexes and progress_callback:
+        progress_callback(
+            f"⚠️ {len(source_fallback_indexes)} dialogue(s) kept in the source language because translation did not return a valid result.",
+            99.0
+        )
 
     if progress_callback:
         progress_callback(f"Translation completed: {len(enriched_segments)} dialogues ready for dubbing.", 100.0)

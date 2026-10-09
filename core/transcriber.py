@@ -102,7 +102,8 @@ def transcribe_audio(
     audio_path: Path | str,
     language: Optional[str] = "zh",
     word_timestamps: bool = True,
-    progress_callback: Optional[Callable[[str, float], None]] = None
+    progress_callback: Optional[Callable[[str, float], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Nhận diện giọng nói từ tệp audio WAV và trích xuất danh sách câu thoại kèm mốc thời gian.
@@ -112,6 +113,7 @@ def transcribe_audio(
         language: Mã ngôn ngữ (ví dụ: 'zh' cho tiếng Trung, 'en' cho tiếng Anh, hoặc 'auto'/None để tự nhận diện).
         word_timestamps: True để lấy mốc thời gian chi tiết đến từng từ (phục vụ hiệu ứng chữ TikTok).
         progress_callback: Hàm nhận (thông điệp, phần trăm tiến độ).
+        cancel_check: Kiểm tra yêu cầu dừng trước khi nạp model và giữa các đoạn nhận diện.
 
     Returns:
         List[Dict[str, Any]]: Danh sách các phân đoạn câu thoại:
@@ -129,10 +131,20 @@ def transcribe_audio(
     if not audio_file.exists():
         raise FileNotFoundError(f"Không tìm thấy tệp âm thanh đầu vào: {audio_path}")
 
+    def check_cancel() -> None:
+        if cancel_check and cancel_check():
+            raise InterruptedError("Speech transcription was cancelled by the user.")
+
+    check_cancel()
+    beam_size = Config.WHISPER_BEAM_SIZE
+    if not isinstance(beam_size, int) or isinstance(beam_size, bool) or beam_size < 1:
+        raise TranscriptionError("WHISPER_BEAM_SIZE must be a positive integer.")
+
     if progress_callback:
         progress_callback("Đang nạp mô hình nhận diện giọng nói faster-whisper...", 10.0)
 
     model = get_whisper_model()
+    check_cancel()
 
     # Chuẩn hóa mã ngôn ngữ (nếu auto thì để None để model tự phát hiện)
     lang = None if (not language or language.lower() in ("auto", "none")) else language.lower()
@@ -141,17 +153,19 @@ def transcribe_audio(
         progress_callback("Đang bóc tách câu thoại và mốc thời gian...", 30.0)
 
     try:
+        check_cancel()
         segments, info = model.transcribe(
             str(audio_file),
             language=lang,
             word_timestamps=word_timestamps,
-            beam_size=5,
+            beam_size=beam_size,
             vad_filter=True, # Bật bộ lọc phát hiện hoạt động giọng nói (bỏ qua khoảng lặng)
             vad_parameters=dict(min_silence_duration_ms=500)
         )
 
         results = []
         for idx, segment in enumerate(segments):
+            check_cancel()
             seg_data = {
                 "index": idx,
                 "start": round(segment.start, 2),
@@ -179,5 +193,7 @@ def transcribe_audio(
 
         return results
 
+    except InterruptedError:
+        raise
     except Exception as e:
         raise TranscriptionError(f"Lỗi trong quá trình nhận diện âm thanh: {str(e)}") from e

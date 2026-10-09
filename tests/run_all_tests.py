@@ -25,6 +25,7 @@ TEST_FILES = [
     "test_phase5.py",
     "test_phase6.py",
     "test_phase7.py",
+    "test_reliability.py",
 ]
 
 

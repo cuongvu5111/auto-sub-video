@@ -3,9 +3,12 @@ AutoDub Studio - Background Processing Worker Thread.
 Handles batch video queue processing asynchronously, keeping the UI responsive.
 """
 
+import threading
+from pathlib import Path
 from typing import List, Dict, Any
 from PySide6.QtCore import QThread, Signal
-from pipeline import run_pipeline
+from pipeline import run_pipeline_job
+from core.job_result import JobStatus
 
 
 class DubbingWorker(QThread):
@@ -22,11 +25,15 @@ class DubbingWorker(QThread):
         super().__init__()
         self.tasks = tasks
         self.options = options
-        self._is_cancelled = False
+        self._cancel_event = threading.Event()
+
+    @property
+    def _is_cancelled(self) -> bool:
+        return self._cancel_event.is_set()
 
     def cancel(self):
         """Request the worker thread to cancel gracefully."""
-        self._is_cancelled = True
+        self._cancel_event.set()
 
     def run(self):
         total = len(self.tasks)
@@ -37,6 +44,8 @@ class DubbingWorker(QThread):
             for idx, task in enumerate(self.tasks):
                 if self._is_cancelled:
                     self.sig_log.emit("⚠️ Cancel signal received from user.")
+                    for pending_task in self.tasks[idx:]:
+                        self.sig_item_status.emit(pending_task["row"], "⏹ Cancelled", "#95A5A6")
                     break
 
                 row = task["row"]
@@ -50,7 +59,7 @@ class DubbingWorker(QThread):
                     self.sig_log.emit(f"  » {msg}")
 
                 try:
-                    final_video = run_pipeline(
+                    result = run_pipeline_job(
                         source=source,
                         source_lang=self.options.get("source_lang", "auto"),
                         voice=self.options.get("voice"),
@@ -63,24 +72,46 @@ class DubbingWorker(QThread):
                         encoder=self.options.get("encoder"),
                         output_dir=self.options.get("output_dir"),
                         enable_dubbing=self.options.get("enable_dubbing", True),
+                        subtitle_path=Path(task["subtitle_path"]) if task.get("subtitle_path") else None,
+                        prefer_attached_subtitle=self.options.get("prefer_attached_subtitle", True),
+                        translate_srt_only=self.options.get("translate_srt_only", False),
+                        delay_offset=self.options.get("delay_offset", 0.0),
                         progress_callback=progress_hook,
-                        cancel_check=lambda: self._is_cancelled
+                        cancel_check=self._cancel_event.is_set
                     )
-                    success_count += 1
-                    self.sig_item_status.emit(row, f"✓ Done - {final_video.name}", "#27AE60")
-                    self.sig_log.emit(f"✓ COMPLETED: {final_video.name}")
+                    if result.status == JobStatus.CANCELLED:
+                        self.sig_item_status.emit(row, "⏹ Stopped", "#95A5A6")
+                        self.sig_log.emit("⏹ STOPPED: Tiến trình đã dừng ngay lập tức theo yêu cầu.")
+                        for pending_task in self.tasks[idx + 1:]:
+                            self.sig_item_status.emit(pending_task["row"], "⏹ Cancelled", "#95A5A6")
+                        break
+                    if result.status == JobStatus.FAILED:
+                        error = result.error or "Unknown pipeline error"
+                        self.sig_item_status.emit(row, f"❌ Failed: {error[:30]}", "#E74C3C")
+                        self.sig_log.emit(f"❌ ERROR PROCESSING: {error}")
+                        continue
 
-                except InterruptedError:
-                    self.sig_item_status.emit(row, "⏹ Stopped", "#95A5A6")
-                    self.sig_log.emit("⏹ STOPPED: Tiến trình đã dừng ngay lập tức theo yêu cầu.")
-                    break
-                except Exception as e:
-                    self.sig_item_status.emit(row, f"❌ Failed: {str(e)[:30]}", "#E74C3C")
-                    self.sig_log.emit(f"❌ ERROR PROCESSING: {str(e)}")
+                    final_video = result.output_path
+                    if final_video is None:
+                        self.sig_item_status.emit(row, "❌ Failed: missing output", "#E74C3C")
+                        self.sig_log.emit("❌ ERROR PROCESSING: pipeline returned success without an output path")
+                        continue
+
+                    success_count += 1
+                    if result.status == JobStatus.COMPLETED_WITH_WARNINGS:
+                        self.sig_item_status.emit(row, f"⚠ Done with warnings - {final_video.name}", "#D97706")
+                        self.sig_log.emit(f"⚠ COMPLETED WITH WARNINGS: {final_video.name}")
+                    else:
+                        self.sig_item_status.emit(row, f"✓ Done - {final_video.name}", "#27AE60")
+                        self.sig_log.emit(f"✓ COMPLETED: {final_video.name}")
+                except Exception as exc:
+                    self.sig_item_status.emit(row, f"❌ Failed: {str(exc)[:30]}", "#E74C3C")
+                    self.sig_log.emit(f"❌ ERROR PROCESSING: {exc}")
 
             if self._is_cancelled:
                 self.sig_log.emit("\n⚠️ Batch processing cancelled by user.")
-            self.sig_progress.emit(100.0)
+            if not self._is_cancelled:
+                self.sig_progress.emit(100.0)
             self.sig_log.emit(f"\n=== FINISHED: {success_count}/{total} VIDEOS SUCCESSFUL ===")
         finally:
             # Phát tín hiệu hoàn tất để MainWindow phục hồi trạng thái nút bấm

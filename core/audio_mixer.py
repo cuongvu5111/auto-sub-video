@@ -7,13 +7,16 @@ và nung phụ đề .ass tùy chọn vào khung hình video.
 import sys
 import os
 import subprocess
-import time
-import threading
+import math
+import uuid
+import wave
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Any, Union
 from config import Config
 from core.audio_extractor import find_ffmpeg
 from core.tts_engine import get_audio_duration
+from core.media_probe import probe_media, MediaProbeError
+from core.process import run_process
 
 # Cấu hình encoding UTF-8 nếu chạy trên Windows
 if sys.platform == "win32":
@@ -22,10 +25,6 @@ if sys.platform == "win32":
         sys.stderr.reconfigure(encoding="utf-8")
     except AttributeError:
         pass
-
-
-# Cờ ẩn cửa sổ console phụ trên Windows khi chạy FFmpeg
-SUBPROCESS_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
 class AudioMixerError(Exception):
@@ -147,7 +146,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     # 1. Thêm các dòng phụ đề thoại (Layer 0)
     for seg in segments:
-        text = seg.get("translated_text", "").strip() or seg.get("text", "").strip()
+        text = _sanitize_ass_text(seg.get("translated_text", "").strip() or seg.get("text", "").strip())
         if not text:
             continue
         start_ts = format_ass_timestamp(seg.get("start", 0.0))
@@ -156,7 +155,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     # 2. Thêm dòng Text Watermark nếu có (Layer 1)
     if has_text_wm:
-        wm_text = text_watermark.get("text", "").strip()
+        wm_text = _sanitize_ass_text(text_watermark.get("text", "").strip())
         timing_mode = text_watermark.get("timing_mode", "mid_video")
         max_seg_end = max((seg.get("end", 0.0) for seg in segments), default=0.0)
         dur = total_duration if (total_duration and total_duration > 0) else max(max_seg_end, 10.0)
@@ -266,11 +265,13 @@ _init_pydub()
 
 
 def create_mixed_audio_track(
-    original_audio_path: Path,
+    original_audio_path: Optional[Path],
     segments: List[Dict[str, Any]],
     output_audio_path: Path,
     ducking_volume: float = 0.10,
-    total_duration: Optional[float] = None
+    total_duration: Optional[float] = None,
+    delay_offset: float = 0.0,
+    cancel_check: Optional[Callable[[], bool]] = None
 ) -> Path:
     """
     Hòa trộn âm thanh lồng tiếng vào âm thanh gốc (Kỹ thuật Audio Ducking):
@@ -278,6 +279,8 @@ def create_mixed_audio_track(
     2. Đặt các file thoại tiếng Việt vào đúng mốc start (ms) trên timeline.
     3. Trộn 2 track thành một file âm thanh hoàn thiện.
     """
+    if cancel_check and cancel_check():
+        raise InterruptedError("The audio mix was cancelled by the user.")
     try:
         from pydub import AudioSegment
     except ImportError:
@@ -285,49 +288,234 @@ def create_mixed_audio_track(
 
     _init_pydub()
 
-    orig_path = Path(original_audio_path).resolve()
+    orig_path = Path(original_audio_path).resolve() if original_audio_path else None
     out_path = Path(output_audio_path).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if not orig_path.exists():
+    if not math.isfinite(float(ducking_volume)) or not 0.0 <= float(ducking_volume) <= 1.0:
+        raise AudioMixerError("Ducking volume must be a finite value between 0 and 1.")
+    if not math.isfinite(float(delay_offset)):
+        raise AudioMixerError("Audio delay must be a finite number.")
+    if total_duration is not None and (not math.isfinite(float(total_duration)) or float(total_duration) <= 0):
+        raise AudioMixerError("Video duration must be a finite positive number.")
+
+    # Load the source once, but allocate working mix tracks one chunk at a time.
+    if orig_path is not None:
+        if not orig_path.exists():
+            raise FileNotFoundError(f"Không tìm thấy file audio gốc: {original_audio_path}")
+        orig_audio = _load_audio_file(orig_path)
+    elif total_duration is not None and total_duration > 0:
+        orig_audio = AudioSegment.silent(duration=int(round(total_duration * 1000)), frame_rate=24000)
+        orig_audio = orig_audio.set_channels(1).set_sample_width(2)
+    else:
         raise FileNotFoundError(f"Không tìm thấy file audio gốc: {original_audio_path}")
 
-    # 1. Nạp audio gốc và giảm âm lượng
-    orig_audio = _load_audio_file(orig_path)
-    
-    # Tính toán mức giảm dB dựa trên tỷ lệ volume (0.10 ~ -20dB)
-    import math
-    if ducking_volume > 0:
-        db_change = 20 * math.log10(max(0.01, ducking_volume))
-        background_track = orig_audio + db_change
-    else:
-        # Nếu ducking_volume = 0 thì tắt hẳn tiếng gốc (tạo đoạn im lặng)
-        background_track = AudioSegment.silent(duration=len(orig_audio))
-
-    # 2. Tạo track lồng tiếng mới (bắt đầu bằng đoạn im lặng bằng độ dài video)
     final_length = len(orig_audio)
-    if total_duration:
-        final_length = max(final_length, int(total_duration * 1000))
-    speech_track = AudioSegment.silent(duration=final_length)
+    if total_duration is not None:
+        final_length = int(round(float(total_duration) * 1000))
+        if len(orig_audio) > final_length:
+            orig_audio = orig_audio[:final_length]
+        elif len(orig_audio) < final_length:
+            silence = AudioSegment.silent(duration=final_length - len(orig_audio), frame_rate=orig_audio.frame_rate)
+            silence = silence.set_channels(orig_audio.channels).set_sample_width(orig_audio.sample_width)
+            orig_audio += silence
 
-    # 3. Chèn từng đoạn thoại lồng tiếng vào đúng mốc thời gian start
+    mix_frame_rate = max(orig_audio.frame_rate, 24000)
+    mix_channels = orig_audio.channels
+    mix_sample_width = max(orig_audio.sample_width, 2)
+    mix_segments = []
     for seg in segments:
+        if cancel_check and cancel_check():
+            raise InterruptedError("The audio mix was cancelled by the user.")
         dubbed_file = seg.get("dubbed_audio_path")
         if not dubbed_file or not Path(dubbed_file).exists():
             continue
 
-        start_ms = int(seg.get("start", 0.0) * 1000)
-        seg_audio = _load_audio_file(dubbed_file)
+        source_fallback = (
+            seg.get("tts_status") == "translation_fallback_source_audio"
+            or seg.get("sync_status") == "failed_silence_fallback"
+            or seg.get("tts_status") == "failed_silence_fallback"
+        )
+        try:
+            start_seconds = float(seg.get("start", 0.0))
+            if not math.isfinite(start_seconds) or start_seconds < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise AudioMixerError(f"Invalid start timestamp in dubbed segment {seg.get('index', '?')}.")
 
-        # Chèn âm thanh lồng tiếng vào đúng vị trí start_ms
-        speech_track = speech_track.overlay(seg_audio, position=start_ms)
+        if source_fallback:
+            try:
+                source_end = float(seg.get("end", start_seconds + (seg.get("dubbed_duration") or 0.0)))
+                if not math.isfinite(source_end):
+                    raise ValueError
+                source_length_ms = max(0, int(round((source_end - start_seconds) * 1000)))
+            except (TypeError, ValueError):
+                try:
+                    source_length_ms = int(round(float(seg.get("dubbed_duration") or 0.0) * 1000))
+                except (TypeError, ValueError):
+                    source_length_ms = 0
+            start_ms = int(round(start_seconds * 1000))
+            source_length_ms = min(source_length_ms, max(0, final_length - start_ms))
+            if source_length_ms > 0:
+                mix_segments.append({
+                    "source_fallback": True,
+                    "start_ms": start_ms,
+                    "duration_ms": source_length_ms,
+                })
+            continue
 
-    # 4. Hòa âm: Đè track lồng tiếng (100% âm lượng) lên track nền (10% âm lượng)
-    mixed_audio = background_track.overlay(speech_track)
+        shifted_start = start_seconds + float(delay_offset)
+        if not math.isfinite(shifted_start):
+            raise AudioMixerError(f"Invalid shifted timestamp in dubbed segment {seg.get('index', '?')}.")
+        start_ms = max(0, int(round(shifted_start * 1000)))
+        if start_ms >= final_length:
+            continue
+        mix_segments.append({
+            "source_fallback": False,
+            "path": Path(dubbed_file).resolve(),
+            "start_ms": start_ms,
+            "trim_ms": max(0, int(round(-shifted_start * 1000))),
+            "duration_ms": None,
+        })
 
-    # Xuất ra file âm thanh đích (AAC hoặc MP3)
-    mixed_audio.export(str(out_path), format="mp3", bitrate="192k")
+    temp_wav = out_path.with_name(f".{out_path.stem}.{uuid.uuid4().hex}.tmp.wav")
+    temp_encoded = out_path.with_name(f".{out_path.stem}.{uuid.uuid4().hex}.tmp{out_path.suffix}")
+    chunk_size_ms = 10_000
+    db_change = 20 * math.log10(max(0.01, float(ducking_volume))) if ducking_volume > 0 else None
+
+    try:
+        with wave.open(str(temp_wav), "wb") as rendered:
+            rendered.setnchannels(mix_channels)
+            rendered.setsampwidth(mix_sample_width)
+            rendered.setframerate(mix_frame_rate)
+
+            for chunk_start in range(0, final_length, chunk_size_ms):
+                if cancel_check and cancel_check():
+                    raise InterruptedError("The audio mix was cancelled by the user.")
+
+                chunk_end = min(final_length, chunk_start + chunk_size_ms)
+                source_chunk = orig_audio[chunk_start:chunk_end]
+                source_chunk = source_chunk.set_frame_rate(mix_frame_rate)
+                source_chunk = source_chunk.set_channels(mix_channels).set_sample_width(mix_sample_width)
+                chunk_length = len(source_chunk)
+                if db_change is not None:
+                    background_track = source_chunk + db_change
+                else:
+                    background_track = AudioSegment.silent(
+                        duration=chunk_length,
+                        frame_rate=mix_frame_rate,
+                    ).set_channels(mix_channels).set_sample_width(mix_sample_width)
+
+                speech_track = AudioSegment.silent(
+                    duration=chunk_length,
+                    frame_rate=mix_frame_rate,
+                ).set_channels(mix_channels).set_sample_width(mix_sample_width)
+
+                for mix_segment in mix_segments:
+                    if cancel_check and cancel_check():
+                        raise InterruptedError("The audio mix was cancelled by the user.")
+
+                    segment_start = mix_segment["start_ms"]
+                    if segment_start >= chunk_end:
+                        continue
+
+                    if mix_segment["source_fallback"]:
+                        segment_end = min(final_length, segment_start + mix_segment["duration_ms"])
+                        if segment_end <= chunk_start:
+                            continue
+                        overlap_start = max(chunk_start, segment_start)
+                        overlap_end = min(chunk_end, segment_end)
+                        source_segment = orig_audio[overlap_start:overlap_end]
+                        source_segment = source_segment.set_frame_rate(mix_frame_rate)
+                        source_segment = source_segment.set_channels(mix_channels).set_sample_width(mix_sample_width)
+                        if len(source_segment):
+                            speech_track = speech_track.overlay(
+                                source_segment,
+                                position=overlap_start - chunk_start,
+                            )
+                        continue
+
+                    segment_duration = mix_segment["duration_ms"]
+                    if segment_duration is not None and segment_start + segment_duration <= chunk_start:
+                        continue
+
+                    segment_audio = _load_audio_file(mix_segment["path"])
+                    trim_ms = mix_segment["trim_ms"]
+                    if trim_ms:
+                        segment_audio = segment_audio[trim_ms:]
+                    segment_audio = segment_audio.set_frame_rate(mix_frame_rate)
+                    segment_audio = segment_audio.set_channels(mix_channels).set_sample_width(mix_sample_width)
+                    if segment_start + len(segment_audio) > final_length:
+                        segment_audio = segment_audio[:final_length - segment_start]
+                    mix_segment["duration_ms"] = len(segment_audio)
+
+                    segment_end = segment_start + len(segment_audio)
+                    if segment_end <= chunk_start:
+                        continue
+                    overlap_start = max(chunk_start, segment_start)
+                    overlap_end = min(chunk_end, segment_end)
+                    segment_piece = segment_audio[
+                        overlap_start - segment_start:overlap_end - segment_start
+                    ]
+                    if len(segment_piece):
+                        speech_track = speech_track.overlay(
+                            segment_piece,
+                            position=overlap_start - chunk_start,
+                        )
+
+                if cancel_check and cancel_check():
+                    raise InterruptedError("The audio mix was cancelled by the user.")
+                mixed_chunk = background_track.overlay(speech_track)
+                rendered.writeframesraw(mixed_chunk.raw_data)
+
+        if out_path.suffix.lower() == ".wav":
+            os.replace(temp_wav, out_path)
+        else:
+            cmd = [find_ffmpeg(), "-y", "-i", str(temp_wav), "-vn"]
+            if out_path.suffix.lower() == ".mp3":
+                cmd.extend(["-b:a", "192k"])
+            cmd.append(str(temp_encoded))
+            run_process(
+                cmd,
+                timeout=Config.FFMPEG_TIMEOUT,
+                cancel_check=cancel_check,
+                check=True,
+            )
+            if not temp_encoded.exists() or temp_encoded.stat().st_size <= 0:
+                raise AudioMixerError("FFmpeg did not produce a valid mixed audio file.")
+            os.replace(temp_encoded, out_path)
+    except InterruptedError:
+        raise
+    except subprocess.CalledProcessError as exc:
+        error_msg = exc.stderr[-300:] if exc.stderr else str(exc)
+        raise AudioMixerError(f"Failed to encode the mixed audio: {error_msg}") from exc
+    except TimeoutError as exc:
+        raise AudioMixerError(str(exc)) from exc
+    finally:
+        temp_wav.unlink(missing_ok=True)
+        temp_encoded.unlink(missing_ok=True)
+
     return out_path
+
+
+def _reserve_output_path(requested_path: Path) -> Path:
+    """Reserve a unique output name without replacing an existing result."""
+    base = requested_path
+    counter = 1
+    while True:
+        candidate = base if counter == 1 else base.with_name(f"{base.stem}_{counter}{base.suffix}")
+        try:
+            descriptor = os.open(str(candidate), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
+            os.close(descriptor)
+            return candidate
+        except FileExistsError:
+            counter += 1
+
+
+def _sanitize_ass_text(value: Any) -> str:
+    """Prevent newlines and override syntax from escaping an ASS dialogue field."""
+    text = str(value or "").replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
 
 
 def render_final_video(
@@ -351,6 +539,7 @@ def render_final_video(
     orig_video = Path(original_video_path).resolve()
     out_video = Path(output_video_path).resolve()
     out_video.parent.mkdir(parents=True, exist_ok=True)
+    render_temp = out_video.with_name(f"{out_video.stem}.{uuid.uuid4().hex}.partial{out_video.suffix}")
 
     if not orig_video.exists():
         raise FileNotFoundError(f"Không tìm thấy video gốc: {original_video_path}")
@@ -436,8 +625,8 @@ def render_final_video(
 
         if has_sub:
             ass_path_str = str(Path(ass_subtitle_path).resolve()).replace("\\", "/")
-            # Trên Windows, ký tự : trong ổ đĩa (D:/) cần escape thành D\:/ trong filter ass
-            ass_path_str = ass_path_str.replace(":", "\\:")
+            # Cú pháp filter của FFmpeg cần escape dấu hai chấm ổ đĩa và dấu nháy.
+            ass_path_str = ass_path_str.replace(":", "\\:").replace("'", "\\'")
             filter_chains.append(f"[{curr_v}]ass='{ass_path_str}'[v]")
             curr_v = "v"
         else:
@@ -466,11 +655,17 @@ def render_final_video(
             "-map", "[v]",
             *audio_map_args,
             *video_codec_args,
-            str(out_video)
+            str(render_temp)
         ])
     else:
         # Trường hợp không có phụ đề lẫn logo
         if has_mixed_audio:
+            if target_encoder == "copy":
+                no_filter_video_args = ["-c:v", "copy"]
+            elif target_encoder == "h264_nvenc":
+                no_filter_video_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "22"]
+            else:
+                no_filter_video_args = ["-c:v", "libx264", "-preset", "fast", "-crf", "22"]
             cmd = [
                 ffmpeg_bin,
                 "-y",
@@ -478,102 +673,114 @@ def render_final_video(
                 "-i", str(mixed_audio),
                 "-map", "0:v:0",
                 "-map", "1:a:0",
-                "-c:v", "copy",
+                *no_filter_video_args,
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-shortest",
-                str(out_video)
+                str(render_temp)
             ]
         else:
-            # Không có phụ đề lẫn logo và giữ nguyên âm thanh gốc: copy passthrough
+            if target_encoder == "copy":
+                no_filter_video_args = ["-c:v", "copy", "-c:a", "copy"]
+            elif target_encoder == "h264_nvenc":
+                no_filter_video_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "22", "-c:a", "aac", "-b:a", "192k"]
+            else:
+                no_filter_video_args = ["-c:v", "libx264", "-preset", "fast", "-crf", "22", "-c:a", "aac", "-b:a", "192k"]
             cmd = [
                 ffmpeg_bin,
                 "-y",
                 "-i", str(orig_video),
-                "-c", "copy",
-                str(out_video)
+                "-map", "0:v:0",
+                "-map", "0:a?",
+                *no_filter_video_args,
+                str(render_temp)
             ]
 
     def run_ffmpeg_cancellable(exec_cmd):
-        proc = subprocess.Popen(
+        return run_process(
             exec_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=SUBPROCESS_NO_WINDOW
+            timeout=Config.FFMPEG_TIMEOUT,
+            cancel_check=cancel_check,
+            check=True,
         )
 
-        stderr_buffer = []
+    def validate_and_publish() -> Path:
+        if cancel_check and cancel_check():
+            raise InterruptedError("The video render was cancelled before publishing the output.")
+        if not render_temp.exists() or render_temp.stat().st_size == 0:
+            raise AudioMixerError("FFmpeg did not create a non-empty temporary video.")
+        try:
+            source_info = probe_media(orig_video)
+            output_info = probe_media(render_temp)
+        except MediaProbeError as exc:
+            raise AudioMixerError(f"Could not validate rendered video: {exc}") from exc
 
-        def _drain_stderr():
-            try:
-                while True:
-                    chunk = proc.stderr.read(2048)
-                    if not chunk:
-                        break
-                    stderr_buffer.append(chunk)
-                    if len(stderr_buffer) > 100:
-                        stderr_buffer.pop(0)
-            except Exception:
-                pass
-            finally:
-                if proc.stderr:
-                    try:
-                        proc.stderr.close()
-                    except Exception:
-                        pass
+        expected_audio = has_mixed_audio or source_info.has_audio
+        if expected_audio and not output_info.has_audio:
+            raise AudioMixerError("Rendered video is missing its required audio stream.")
+        fps = source_info.frame_rate or 24.0
+        duration_tolerance = max(0.15, 2.0 / fps)
+        if abs(output_info.duration - source_info.duration) > duration_tolerance:
+            raise AudioMixerError(
+                f"Rendered duration {output_info.duration:.3f}s differs from source "
+                f"{source_info.duration:.3f}s by more than {duration_tolerance:.3f}s."
+            )
 
-        reader_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        reader_thread.start()
+        published_path = _reserve_output_path(out_video)
+        try:
+            os.replace(render_temp, published_path)
+        except Exception:
+            published_path.unlink(missing_ok=True)
+            raise
+        return published_path
 
-        while proc.poll() is None:
-            if cancel_check and cancel_check():
-                proc.kill()
-                proc.wait()
-                reader_thread.join(timeout=1.0)
-                raise InterruptedError("Tiến trình render video đã bị dừng bởi người dùng.")
-            time.sleep(0.2)
-
-        reader_thread.join(timeout=2.0)
-
-        if proc.returncode != 0:
-            stderr_out = "".join(stderr_buffer)
-            raise subprocess.CalledProcessError(proc.returncode, exec_cmd, output="", stderr=stderr_out)
-        return proc
+    def make_cpu_fallback(exec_cmd):
+        fallback = []
+        index = 0
+        while index < len(exec_cmd):
+            if exec_cmd[index:index + 2] == ["-c:v", "h264_nvenc"]:
+                fallback.extend(["-c:v", "libx264", "-preset", "fast", "-crf", "22"])
+                index += 6
+            elif exec_cmd[index:index + 2] == ["-c:v", "copy"]:
+                fallback.extend(["-c:v", "libx264", "-preset", "fast", "-crf", "22"])
+                index += 2
+            elif exec_cmd[index:index + 2] == ["-c:a", "copy"]:
+                fallback.extend(["-c:a", "aac", "-b:a", "192k"])
+                index += 2
+            else:
+                fallback.append(exec_cmd[index])
+                index += 1
+        return fallback
 
     try:
         run_ffmpeg_cancellable(cmd)
-        if not out_video.exists() or out_video.stat().st_size == 0:
-            raise AudioMixerError("Tệp video xuất ra bị rỗng hoặc không tồn tại.")
-
+        result_path = validate_and_publish()
         if progress_callback:
-            progress_callback(f"Xuất video hoàn tất: {out_video.name}", 100.0)
-
-        return out_video
-
-    except subprocess.CalledProcessError as e:
-        # Tự động Fallback về CPU libx264 nếu h264_nvenc không thể khởi động
-        if target_encoder == "h264_nvenc":
+            progress_callback(f"Xuất video hoàn tất: {result_path.name}", 100.0)
+        return result_path
+    except subprocess.CalledProcessError as primary_error:
+        should_fallback = target_encoder == "h264_nvenc" or target_encoder == "copy"
+        if should_fallback:
+            render_temp.unlink(missing_ok=True)
+            fallback_cmd = make_cpu_fallback(cmd)
             try:
-                fb_cmd = []
-                idx = 0
-                while idx < len(cmd):
-                    if cmd[idx] == "-c:v" and idx + 1 < len(cmd) and cmd[idx + 1] == "h264_nvenc":
-                        fb_cmd.extend(["-c:v", "libx264", "-preset", "fast", "-crf", "22"])
-                        idx += 6  # Bỏ qua: -c:v, h264_nvenc, -preset, p4, -cq, 22
-                    else:
-                        fb_cmd.append(cmd[idx])
-                        idx += 1
+                run_ffmpeg_cancellable(fallback_cmd)
+                result_path = validate_and_publish()
+                if progress_callback:
+                    progress_callback(f"Xuất video hoàn tất (CPU fallback): {result_path.name}", 100.0)
+                return result_path
+            except InterruptedError:
+                raise
+            except subprocess.CalledProcessError as fallback_error:
+                error_source = fallback_error
+            except AudioMixerError:
+                raise
+        else:
+            error_source = primary_error
 
-                run_ffmpeg_cancellable(fb_cmd)
-                if out_video.exists() and out_video.stat().st_size > 0:
-                    if progress_callback:
-                        progress_callback(f"Xuất video hoàn tất (CPU Fallback): {out_video.name}", 100.0)
-                    return out_video
-            except Exception:
-                pass
-
-        error_msg = e.stderr[-400:] if e.stderr else str(e)
-        raise AudioMixerError(f"Lỗi khi render video bằng FFmpeg: {error_msg}") from e
+        error_msg = error_source.stderr[-400:] if error_source.stderr else str(error_source)
+        raise AudioMixerError(f"Lỗi khi render video bằng FFmpeg: {error_msg}") from error_source
+    except TimeoutError as exc:
+        raise AudioMixerError(str(exc)) from exc
+    finally:
+        render_temp.unlink(missing_ok=True)

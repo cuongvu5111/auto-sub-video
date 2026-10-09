@@ -322,8 +322,8 @@ def test_toggle_dubbing_ui():
     assert win.cbo_voice.isEnabled() is True
     assert win.spn_ducking.isEnabled() is True
     assert win.spn_delay.isEnabled() is True
-    assert win.txt_clone.isEnabled() is True
-    assert win.btn_browse_clone.isEnabled() is True
+    assert win.txt_clone.isEnabled() is False
+    assert win.btn_browse_clone.isEnabled() is False
 
     print("✓ test_toggle_dubbing_ui: PASSED (Bật/tắt lồng tiếng AI & giữ âm thanh gốc hoạt động chuẩn xác)")
 

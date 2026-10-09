@@ -56,6 +56,8 @@ except ImportError:
 class Config:
     """Lớp chứa toàn bộ thông số cấu hình của ứng dụng."""
 
+    _HARDWARE_CAPABILITIES: dict | None = None
+
     # Đường dẫn thư mục gốc dự án (nơi người dùng lưu file exe hoặc mã nguồn)
     BASE_DIR: Path = _app_dir
     INTERNAL_DIR: Path = _internal_dir
@@ -65,6 +67,9 @@ class Config:
 
     # Thư mục chứa dữ liệu tạm (audio cắt nhỏ, video tải về)
     TEMP_DIR: Path = BASE_DIR / "temp"
+
+    # Keep intermediates only when explicitly requested for troubleshooting.
+    KEEP_INTERMEDIATES: bool = os.getenv("KEEP_INTERMEDIATES", "false").lower() in ("true", "1", "yes")
 
     # Thư mục xuất video kết quả mặc định
     OUTPUT_DIR: Path = BASE_DIR / os.getenv("DEFAULT_OUTPUT_DIR", "output")
@@ -78,6 +83,12 @@ class Config:
     LLM_MODEL: str = os.getenv("LLM_MODEL") or os.getenv("VNPT_LLM_MODEL", "global-llm")
     LLM_API_KEY: str = os.getenv("LLM_API_KEY") or os.getenv("VNPT_LLM_API_KEY", "no-key-required")
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "60.0"))
+    LLM_TRANSLATION_BATCH_SIZE: int = int(os.getenv("LLM_TRANSLATION_BATCH_SIZE", "4"))
+    FFMPEG_TIMEOUT: float = float(os.getenv("FFMPEG_TIMEOUT", "1800"))
+    TTS_REQUEST_TIMEOUT: float = float(os.getenv("TTS_REQUEST_TIMEOUT", "20"))
+    TTS_SEGMENT_TIMEOUT: float = float(os.getenv("TTS_SEGMENT_TIMEOUT", "60"))
+    TTS_MAX_CONCURRENCY: int = int(os.getenv("TTS_MAX_CONCURRENCY", "2"))
+    TTS_REQUEST_PACING_SECONDS: float = float(os.getenv("TTS_REQUEST_PACING_SECONDS", "0.2"))
 
     # Cấu hình LLM dự phòng (Fallback / Backup Provider khi chạm Rate Limit 429)
     LLM_BACKUP_ENABLED: bool = os.getenv("LLM_BACKUP_ENABLED", "false").lower() in ("true", "1", "yes")
@@ -92,6 +103,8 @@ class Config:
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
     WHISPER_DEVICE: str = os.getenv("WHISPER_DEVICE", "auto")
     WHISPER_COMPUTE_TYPE: str = os.getenv("WHISPER_COMPUTE_TYPE", "auto")
+    WHISPER_BEAM_SIZE: int = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
+    WHISPER_WORD_TIMESTAMPS: bool = os.getenv("WHISPER_WORD_TIMESTAMPS", "true").lower() in ("true", "1", "yes")
 
     # Cấu hình lồng tiếng Text-to-Speech (edge-tts)
     DEFAULT_VOICE: str = os.getenv("DEFAULT_VOICE", "vi-VN-NamMinhNeural")
@@ -112,12 +125,18 @@ class Config:
         cls.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def detect_hardware_capabilities(cls) -> dict:
+    def detect_hardware_capabilities(cls, refresh: bool = False) -> dict:
         """
         Tự động phát hiện khả năng tăng tốc phần cứng của hệ thống:
         - NVIDIA CUDA (qua ctranslate2) cho mô hình Whisper Speech-to-Text.
         - NVIDIA NVENC (qua ffmpeg h264_nvenc) cho tác vụ mã hóa video.
+
+        Kết quả được cache trong phiên chạy vì kiểm tra NVENC khởi chạy FFmpeg.
+        Truyền refresh=True khi cần dò lại rõ ràng.
         """
+        if cls._HARDWARE_CAPABILITIES is not None and not refresh:
+            return dict(cls._HARDWARE_CAPABILITIES)
+
         import subprocess
         capabilities = {
             "has_cuda": False,
@@ -154,7 +173,8 @@ class Config:
         except Exception:
             pass
 
-        return capabilities
+        cls._HARDWARE_CAPABILITIES = dict(capabilities)
+        return dict(capabilities)
 
     @classmethod
     def save_llm_config(cls, base_url: str, api_key: str, model: str,

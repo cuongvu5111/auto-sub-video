@@ -2,6 +2,8 @@
 
 An end-to-end development roadmap and phase-by-phase checklist for AutoSub Dubbing Studio, featuring automated video downloads, Speech-to-Text transcription, LLM translation, AI voice dubbing, and a PySide6 Desktop Studio interface.
 
+> For the follow-up reliability work identified in the pipeline review, see [Video Pipeline Reliability and Completion Plan](reliability_improvement_plan.md).
+
 ---
 
 ## 📋 Roadmap & Phase Checklists
@@ -101,7 +103,7 @@ flowchart LR
 ---
 
 ### Phase 8: Comprehensive Testing & Standalone Executable (.exe)
-- [x] Automated test runner executing all tests: `tests/run_all_tests.py` (6/6 tests PASSED).
+- [x] Automated test runner executing all test modules: `tests/run_all_tests.py` (7/7 modules passed; optional network checks skipped when unavailable).
 - [x] Standalone Windows executable packager: `build_exe.py` (PyInstaller script bundling portable FFmpeg).
 - [x] 1-Click launcher script for Windows: `run_gui.bat`.
 - [x] Documentation and internationalization to English for global distribution.
