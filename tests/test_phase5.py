@@ -173,11 +173,19 @@ def test_tts_batch_reuses_one_event_loop():
                 timing_callback("PyAV duration probe", 0.001)
             return 0.8
 
+        real_new_loop = asyncio.new_event_loop
+        created_loops = []
+
+        def make_loop():
+            loop = real_new_loop()
+            created_loops.append(loop)
+            return loop
+
         with patch("core.tts_engine.synthesize_speech_async", new=AsyncMock(return_value=True)) as synthesize, \
              patch("core.tts_engine.adjust_audio_speed", side_effect=sync_audio), \
              patch("core.tts_engine.get_audio_duration", side_effect=fake_duration), \
              patch("core.tts_engine.time.sleep"), \
-             patch("core.tts_engine.asyncio.new_event_loop", wraps=asyncio.new_event_loop) as new_loop:
+             patch("core.tts_engine.asyncio.new_event_loop", side_effect=make_loop) as new_loop:
             logs = []
             results = process_dubbing_segments(
                 [
@@ -191,7 +199,8 @@ def test_tts_batch_reuses_one_event_loop():
         assert len(results) == 2
         assert synthesize.await_count == 2
         assert new_loop.call_count == 1
-        assert new_loop.return_value.is_closed()
+        assert len(created_loops) == 1
+        assert created_loops[0].is_closed()
         assert any(message.startswith("TTS performance timings:") for message in logs)
 
     print("✓ test_tts_batch_reuses_one_event_loop: PASSED")
