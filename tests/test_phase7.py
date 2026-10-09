@@ -25,9 +25,13 @@ def test_gui_syntax_and_structure():
     source = gui_file.read_text(encoding="utf-8")
     tree = ast.parse(source)
 
-    class_names = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
-    assert "DubbingWorker" in class_names, "Thiếu class DubbingWorker trong gui.py"
-    assert "MainWindow" in class_names, "Thiếu class MainWindow trong gui.py"
+    exported_names = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                exported_names.append(alias.asname or alias.name)
+    assert "DubbingWorker" in exported_names, "Thiếu class DubbingWorker trong gui.py"
+    assert "MainWindow" in exported_names, "Thiếu class MainWindow trong gui.py"
     print("✓ test_gui_syntax_and_structure: PASSED (Cú pháp hợp lệ, có DubbingWorker và MainWindow)")
 
 
