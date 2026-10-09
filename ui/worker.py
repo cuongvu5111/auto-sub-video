@@ -76,6 +76,7 @@ class DubbingWorker(QThread):
                         prefer_attached_subtitle=self.options.get("prefer_attached_subtitle", True),
                         translate_srt_only=self.options.get("translate_srt_only", False),
                         delay_offset=self.options.get("delay_offset", 0.0),
+                        export_profile=self.options.get("export_profile"),
                         progress_callback=progress_hook,
                         cancel_check=self._cancel_event.is_set
                     )

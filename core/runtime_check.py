@@ -45,6 +45,7 @@ def run_runtime_self_check(
         source_fixture = work_dir / "subtitle_fixture.mp4"
         ass_path = work_dir / "subtitle_fixture.ass"
         output_fixture = work_dir / "subtitle_rendered.mp4"
+        portrait_fixture = work_dir / "portrait_profile_rendered.mp4"
         run_process(
             [
                 str(ffmpeg_path), "-y", "-v", "error",
@@ -71,6 +72,20 @@ def run_runtime_self_check(
             encoder="libx264",
         )
         rendered_info = probe_media(output_fixture)
+
+        render_final_video(
+            source_fixture,
+            None,
+            portrait_fixture,
+            ass_subtitle_path=ass_path,
+            encoder="libx264",
+            export_profile={"name": "tiktok_9_16", "width": 360, "height": 640, "fit_mode": "crop"},
+        )
+        portrait_info = probe_media(portrait_fixture)
+        if (portrait_info.width, portrait_info.height) != (360, 640):
+            raise RuntimeError("Frozen TikTok portrait export did not produce the requested dimensions.")
+        if portrait_info.video_codec != "h264" or portrait_info.audio_codec != "aac":
+            raise RuntimeError("Frozen TikTok portrait export did not produce H.264/AAC streams.")
 
         import av
 
@@ -102,5 +117,9 @@ def run_runtime_self_check(
         "subtitle_bright_pixels": bright_pixels,
         "rendered_fixture_video_codec": rendered_info.video_codec,
         "rendered_fixture_audio_present": rendered_info.has_audio,
+        "portrait_profile_dimensions": f"{portrait_info.width}x{portrait_info.height}",
+        "portrait_profile_video_codec": portrait_info.video_codec,
+        "portrait_profile_audio_codec": portrait_info.audio_codec,
+        "portrait_profile_full_decode": "passed",
         "writable_temp_and_output_dirs": True,
     }

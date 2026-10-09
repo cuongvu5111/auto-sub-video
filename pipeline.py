@@ -29,6 +29,7 @@ from core.translator import translate_segments
 from core.tts_engine import process_dubbing_segments
 from core.audio_mixer import generate_ass_file, create_mixed_audio_track, render_final_video
 from core.subtitles import parse_srt
+from core.video_profiles import ass_play_resolution, resolve_video_export_profile
 
 
 def _normalize_segments(segments, duration: float, warning_callback=None):
@@ -121,7 +122,8 @@ def _run_pipeline(
     subtitle_path: Optional[Path] = None,
     prefer_attached_subtitle: bool = True,
     translate_srt_only: bool = False,
-    delay_offset: float = 0.0
+    delay_offset: float = 0.0,
+    export_profile: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
     Điều phối toàn bộ luồng xử lý tự động từ Video nguồn (Link/Tệp) ra Video thành phẩm.
@@ -167,6 +169,7 @@ def _run_pipeline(
             print(f"[{percent:5.1f}%] {msg}")
 
     check_cancel()
+    profile = resolve_video_export_profile(export_profile)
     subtitle_segments = None
     if translate_srt_only and not subtitle_path:
         raise ValueError("Translate SRT only is enabled, but no SRT file is attached to this video.")
@@ -198,6 +201,17 @@ def _run_pipeline(
         f"audio={media_info.has_audio}",
         19.0
     )
+    if profile.transforms_video and media_info.width and media_info.height:
+        if profile.fit_mode == "crop":
+            upscale_factor = max(profile.width / media_info.width, profile.height / media_info.height)
+        else:
+            upscale_factor = min(profile.width / media_info.width, profile.height / media_info.height)
+        if upscale_factor > 1.01:
+            report(
+                f"Warning: portrait export will upscale source pixels by about {upscale_factor:.2f}x; "
+                "this changes output dimensions but does not add image detail.",
+                19.1,
+            )
 
     whisper_lang = None if (not source_lang or source_lang.lower() in ("auto", "none")) else source_lang.lower()
     raw_audio_path = None
@@ -294,6 +308,9 @@ def _run_pipeline(
     ass_file = None
     sub_opts = subtitle_options or {}
     wm_opts = watermark_options or {}
+    target_width = profile.width if profile.transforms_video else (media_info.width or 720)
+    target_height = profile.height if profile.transforms_video else (media_info.height or 1280)
+    play_res_x, play_res_y = ass_play_resolution(target_width, target_height)
 
     text_wm_config = None
     if wm_opts.get("text_enabled", False) and wm_opts.get("text", "").strip():
@@ -326,7 +343,9 @@ def _run_pipeline(
             alignment=sub_opts.get("alignment", 2),
             box_padding=sub_opts.get("box_padding"),
             total_duration=media_info.duration,
-            text_watermark=text_wm_config
+            text_watermark=text_wm_config,
+            play_res_x=play_res_x,
+            play_res_y=play_res_y
         )
 
     check_cancel()
@@ -345,7 +364,8 @@ def _run_pipeline(
         watermark_options=wm_opts,
         encoder=encoder,
         progress_callback=lambda m, p: report(f"Step 6/6: {m}", 90.0 + p * 0.10),
-        cancel_check=cancel_check
+        cancel_check=cancel_check,
+        export_profile=export_profile,
     )
 
 
@@ -381,7 +401,8 @@ def run_pipeline(
     subtitle_path: Optional[Path] = None,
     prefer_attached_subtitle: bool = True,
     translate_srt_only: bool = False,
-    delay_offset: float = 0.0
+    delay_offset: float = 0.0,
+    export_profile: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Run one job in an isolated workspace and clean it up on every exit path."""
     workspace_dir = create_job_workspace()
@@ -406,6 +427,7 @@ def run_pipeline(
             prefer_attached_subtitle=prefer_attached_subtitle,
             translate_srt_only=translate_srt_only,
             delay_offset=delay_offset,
+            export_profile=export_profile,
         )
     finally:
         if not Config.KEEP_INTERMEDIATES:

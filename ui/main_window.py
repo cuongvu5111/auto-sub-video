@@ -419,7 +419,7 @@ class MainWindow(QMainWindow):
 
         # Group ⑤ Export
         grp_export = QGroupBox("⑤ Export")
-        grp_export.setMinimumHeight(280)
+        grp_export.setMinimumHeight(340)
         layout_export = QGridLayout(grp_export)
         layout_export.setContentsMargins(18, 10, 18, 10)
         layout_export.setVerticalSpacing(8)
@@ -603,8 +603,30 @@ class MainWindow(QMainWindow):
         h_enc.addStretch()
         layout_export.addLayout(h_enc, 5, 1)
 
-        # Row 6: Save To
-        layout_export.addWidget(QLabel("Save To:"), 6, 0)
+        layout_export.addWidget(QLabel("Video Profile:"), 6, 0)
+        h_profile = QHBoxLayout()
+        h_profile.setSpacing(10)
+        self.cbo_export_profile = QComboBox()
+        self.cbo_export_profile.setFixedHeight(32)
+        self.cbo_export_profile.addItem("Original size", "original")
+        self.cbo_export_profile.addItem("TikTok Portrait 9:16 (1080×1920)", "tiktok_9_16")
+        self.cbo_export_fit = QComboBox()
+        self.cbo_export_fit.setFixedHeight(32)
+        self.cbo_export_fit.addItem("Crop to fill", "crop")
+        self.cbo_export_fit.addItem("Fit with black bars", "contain")
+        self.cbo_export_profile.currentIndexChanged.connect(
+            lambda _index: self.cbo_export_fit.setEnabled(
+                self.cbo_export_profile.currentData() == "tiktok_9_16"
+            )
+        )
+        self.cbo_export_fit.setEnabled(False)
+        h_profile.addWidget(self.cbo_export_profile)
+        h_profile.addWidget(self.cbo_export_fit)
+        h_profile.addStretch()
+        layout_export.addLayout(h_profile, 6, 1)
+
+        # Row 7: Save To
+        layout_export.addWidget(QLabel("Save To:"), 7, 0)
         h_out = QHBoxLayout()
         h_out.setSpacing(8)
         self.txt_output_dir = QLineEdit(str(Config.OUTPUT_DIR))
@@ -616,7 +638,7 @@ class MainWindow(QMainWindow):
         self.btn_browse_out.clicked.connect(self.action_browse_output_dir)
         h_out.addWidget(self.txt_output_dir)
         h_out.addWidget(self.btn_browse_out)
-        layout_export.addLayout(h_out, 6, 1)
+        layout_export.addLayout(h_out, 7, 1)
         right_col.addWidget(grp_export)
 
         config_grid.addLayout(right_col, 0, 1)
@@ -1422,6 +1444,8 @@ class MainWindow(QMainWindow):
             "border_style": getattr(self, "sub_border_style", 3),
             "text_color": getattr(self, "sub_text_color", "#FFE600"),
             "bg_color": getattr(self, "sub_bg_color", "#000000"),
+            "export_profile_name": self.cbo_export_profile.currentData() or "original",
+            "export_fit_mode": self.cbo_export_fit.currentData() or "crop",
         }
 
         # 3. Khởi tạo và hiển thị Dialog
@@ -1564,6 +1588,10 @@ class MainWindow(QMainWindow):
             watermark_options = dict(self.watermark_config)
 
         encoder_key = self.cbo_encoder.currentData() or "libx264"
+        profile_name = self.cbo_export_profile.currentData() or "original"
+        export_profile = {"name": profile_name}
+        if profile_name == "tiktok_9_16":
+            export_profile.update({"width": 1080, "height": 1920, "fit_mode": self.cbo_export_fit.currentData() or "crop"})
         options = {
             "source_lang": source_lang,
             "voice": voice_key,
@@ -1574,6 +1602,7 @@ class MainWindow(QMainWindow):
             "subtitle_options": subtitle_options,
             "watermark_options": watermark_options,
             "encoder": encoder_key,
+            "export_profile": export_profile,
             "enable_dubbing": self.chk_enable_dubbing.isChecked(),
             "prefer_attached_subtitle": self.cbo_mode.currentIndex() == 0,
             "translate_srt_only": self.chk_only_srt.isChecked(),

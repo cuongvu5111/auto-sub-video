@@ -236,6 +236,10 @@ def test_subtitle_live_preview_and_dialog():
     assert canvas.box_padding == 8
     assert canvas.text_color == "#FFE600"
     assert canvas.bg_color == "#000000"
+    canvas.set_fit_mode("contain")
+    canvas.set_safe_area_visible(True)
+    assert canvas.fit_mode == "contain"
+    assert canvas.show_safe_area is True
 
     # Kiểm tra tín hiệu margin_v_changed
     received_margin = []
@@ -254,7 +258,9 @@ def test_subtitle_live_preview_and_dialog():
         "sub_style": "TikTok Black Box (Yellow Text) [Che Sub Chuẩn]",
         "border_style": 3,
         "text_color": "#FFE600",
-        "bg_color": "#000000"
+        "bg_color": "#000000",
+        "export_profile_name": "tiktok_9_16",
+        "export_fit_mode": "contain"
     }
     dlg = SubtitlePreviewDialog(None, video_paths=[], current_settings=test_sub_settings)
     assert hasattr(dlg, "canvas")
@@ -268,6 +274,9 @@ def test_subtitle_live_preview_and_dialog():
     assert dlg.spn_margin_v.value() == 120
     assert dlg.spn_padding.value() == 8
     assert dlg.spn_font_sz.value() == 34
+    assert dlg.cbo_aspect.currentData() == "9:16"
+    assert dlg.canvas.fit_mode == "contain"
+    assert dlg.chk_safe_area.isChecked()
 
     # Thay đổi Margin V sang 220px (Cover Mid Sub)
     dlg.cbo_preset_pos.setCurrentText("Cover Mid Sub (220px)")
@@ -285,12 +294,23 @@ def test_subtitle_live_preview_and_dialog():
     assert res["border_style"] == 3
     assert res["text_color"] == "#FFE600"
     assert res["bg_color"] == "#000000"
+    assert res["export_profile_name"] == "tiktok_9_16"
+    assert res["export_fit_mode"] == "contain"
+    assert res["show_safe_area"] is True
 
     # 3. Kiểm tra MainWindow có nút btn_preview_sub và method action_open_subtitle_preview_dialog
     win = MainWindow()
     assert hasattr(win, "btn_preview_sub")
     assert hasattr(win, "action_open_subtitle_preview_dialog")
     assert win.btn_preview_sub.text().startswith("👁️ Preview Sub")
+    assert hasattr(win, "cbo_export_profile")
+    assert hasattr(win, "cbo_export_fit")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+    win.show()
+    app.processEvents()
+    assert not win.cbo_export_profile.geometry().intersects(win.txt_output_dir.geometry())
+    win.close()
 
     print("✓ test_subtitle_live_preview_and_dialog: PASSED (Canvas, Dialog, Hardsub Box và đồng bộ 2 chiều hoàn hảo)")
 

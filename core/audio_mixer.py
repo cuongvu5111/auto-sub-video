@@ -17,6 +17,7 @@ from core.audio_extractor import find_ffmpeg
 from core.tts_engine import get_audio_duration
 from core.media_probe import probe_media, MediaProbeError
 from core.process import run_process
+from core.video_profiles import resolve_video_export_profile
 
 # Cấu hình encoding UTF-8 nếu chạy trên Windows
 if sys.platform == "win32":
@@ -30,6 +31,34 @@ if sys.platform == "win32":
 class AudioMixerError(Exception):
     """Lỗi xảy ra trong quá trình hòa âm hoặc render video."""
     pass
+
+
+def _validate_full_media_decode(media_path: Path, cancel_check=None) -> None:
+    """Decode all streams so portrait exports are not published with truncated/corrupt packets."""
+    try:
+        import av
+        video_frames = 0
+        audio_frames = 0
+        with av.open(str(media_path)) as container:
+            expect_audio = bool(container.streams.audio)
+            for packet in container.demux():
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Video validation was cancelled before output publishing.")
+                for _frame in packet.decode():
+                    if packet.stream.type == "video":
+                        video_frames += 1
+                    elif packet.stream.type == "audio":
+                        audio_frames += 1
+        if video_frames <= 0:
+            raise AudioMixerError("Rendered portrait video contains no decodable video frames.")
+        if expect_audio and audio_frames <= 0:
+            raise AudioMixerError("Rendered portrait video contains no decodable audio frames.")
+    except InterruptedError:
+        raise
+    except AudioMixerError:
+        raise
+    except Exception as exc:
+        raise AudioMixerError(f"Rendered portrait video failed full-stream decode validation: {exc}") from exc
 
 
 def format_ass_timestamp(seconds: float) -> str:
@@ -88,7 +117,9 @@ def generate_ass_file(
     alignment: int = 2,                  # Căn chỉnh vị trí (2: Dưới, 5: Giữa, 8: Trên)
     box_padding: Optional[int] = None,   # Khoảng đệm hộp (nếu có sẽ áp dụng vào outline_width)
     total_duration: Optional[float] = None, # Tổng thời lượng video (giây)
-    text_watermark: Optional[Dict[str, Any]] = None # Cấu hình chèn text watermark
+    text_watermark: Optional[Dict[str, Any]] = None, # Cấu hình chèn text watermark
+    play_res_x: int = 720,
+    play_res_y: int = 1280,
 ) -> Path:
     """
     Sinh file phụ đề định dạng ASS (Advanced SubStation Alpha) với kiểu chữ nổi bật cho TikTok.
@@ -135,8 +166,8 @@ ScriptType: v4.00+
 WrapStyle: 0
 ScaledBorderAndShadow: yes
 YCbCr Matrix: None
-PlayResX: 720
-PlayResY: 1280
+PlayResX: {int(play_res_x)}
+PlayResY: {int(play_res_y)}
 
 {styles_section}
 [Events]
@@ -271,7 +302,7 @@ def create_mixed_audio_track(
     ducking_volume: float = 0.10,
     total_duration: Optional[float] = None,
     delay_offset: float = 0.0,
-    cancel_check: Optional[Callable[[], bool]] = None
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> Path:
     """
     Hòa trộn âm thanh lồng tiếng vào âm thanh gốc (Kỹ thuật Audio Ducking):
@@ -526,7 +557,8 @@ def render_final_video(
     watermark_options: Optional[Dict[str, Any]] = None,
     encoder: Optional[str] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None,
-    cancel_check: Optional[Callable[[], bool]] = None
+    cancel_check: Optional[Callable[[], bool]] = None,
+    export_profile: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
     Đóng gói video hoàn thiện bằng FFmpeg:
@@ -561,6 +593,8 @@ def render_final_video(
         progress_callback(action_msg, 70.0)
 
     has_sub = bool(ass_subtitle_path and Path(ass_subtitle_path).exists())
+    profile = resolve_video_export_profile(export_profile)
+    has_profile_transform = profile.transforms_video
 
     # Kiểm tra cấu hình Logo Watermark
     has_logo = False
@@ -580,12 +614,12 @@ def render_final_video(
         target_encoder = "h264_nvenc" if hw["has_nvenc"] else "libx264"
     elif "nvenc" in enc_lower:
         target_encoder = "h264_nvenc"
-    elif "copy" in enc_lower and not (has_sub or has_logo):
+    elif "copy" in enc_lower and not (has_sub or has_logo or has_profile_transform):
         target_encoder = "copy"
     else:
         target_encoder = "libx264"
 
-    if has_sub or has_logo:
+    if has_sub or has_logo or has_profile_transform:
         # Trường hợp cần xử lý hình ảnh qua filter_complex
         cmd = [
             ffmpeg_bin,
@@ -597,6 +631,21 @@ def render_final_video(
 
         filter_chains = []
         curr_v = "0:v"
+
+        if has_profile_transform:
+            target_w = profile.width
+            target_h = profile.height
+            if profile.fit_mode == "crop":
+                filter_chains.append(
+                    f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+                    f"crop={target_w}:{target_h},setsar=1[v_profile]"
+                )
+            else:
+                filter_chains.append(
+                    f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+                    f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[v_profile]"
+                )
+            curr_v = "v_profile"
 
         if has_logo:
             cmd.extend(["-i", str(logo_path)])
@@ -718,6 +767,22 @@ def render_final_video(
         expected_audio = has_mixed_audio or source_info.has_audio
         if expected_audio and not output_info.has_audio:
             raise AudioMixerError("Rendered video is missing its required audio stream.")
+        if has_profile_transform and (output_info.width, output_info.height) != (profile.width, profile.height):
+            raise AudioMixerError(
+                f"Rendered dimensions {output_info.width}x{output_info.height} do not match requested "
+                f"profile {profile.width}x{profile.height}."
+            )
+        if has_profile_transform and output_info.video_codec != "h264":
+            raise AudioMixerError(
+                f"Portrait export must use H.264 video; received {output_info.video_codec or 'unknown'}."
+            )
+        if has_profile_transform and output_info.has_audio and output_info.audio_codec != "aac":
+            raise AudioMixerError(
+                f"Portrait export must use AAC audio when audio is present; received "
+                f"{output_info.audio_codec or 'unknown'}."
+            )
+        if has_profile_transform:
+            _validate_full_media_decode(render_temp, cancel_check=cancel_check)
         fps = source_info.frame_rate or 24.0
         duration_tolerance = max(0.15, 2.0 / fps)
         if abs(output_info.duration - source_info.duration) > duration_tolerance:

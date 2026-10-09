@@ -357,17 +357,67 @@ def test_pipeline_uses_attached_srt_without_whisper():
                 prefer_attached_subtitle=True,
                 translate_srt_only=True,
                 enable_dubbing=False,
+                export_profile={"name": "tiktok_9_16", "width": 360, "height": 640, "fit_mode": "crop"},
                 progress_callback=lambda message, percent: progress_messages.append(message),
                 workspace_dir=folder / "work",
                 output_dir=output,
             )
         assert result.name == "result.mp4"
         assert render.call_args.kwargs["ass_subtitle_path"] == folder / "work" / "subtitles.ass"
+        assert render.call_args.kwargs["export_profile"]["name"] == "tiktok_9_16"
+        ass_text = (folder / "work" / "subtitles.ass").read_text(encoding="utf-8")
+        assert "PlayResX: 720" in ass_text and "PlayResY: 1280" in ass_text
         completion = next(message for message in progress_messages if message.startswith("Pipeline completed!"))
         assert "Stage timings:" in completion
         assert "SRT parsing=" in completion and "LLM translation=" in completion
         assert "video rendering=" in completion
     print("✓ test_pipeline_uses_attached_srt_without_whisper: PASSED")
+
+
+def test_short_landscape_srt_clip_exports_portrait_without_audio():
+    """Exercise a real short no-audio SRT pipeline through portrait rendering."""
+    import subprocess
+    from core.audio_extractor import find_ffmpeg
+    from core.media_probe import probe_media
+    import pipeline
+
+    with tempfile.TemporaryDirectory(prefix="short_tiktok_srt_", dir=str(root_dir / "temp")) as tmp:
+        folder = Path(tmp)
+        video = folder / "short_landscape.mp4"
+        srt = folder / "short.srt"
+        output = folder / "output"
+        output.mkdir()
+        ffmpeg_bin = find_ffmpeg()
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-f", "lavfi", "-i", "color=c=navy:s=320x180:r=24:d=1.2",
+             "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=creationflags,
+        )
+        srt.write_text("1\n00:00:00,100 --> 00:00:01,100\nHello short clip\n", encoding="utf-8")
+
+        def translated(segments, **_kwargs):
+            return [{**item, "translated_text": "Xin chào video ngắn", "translation_status": "translated"} for item in segments]
+
+        progress_messages = []
+        with patch.object(pipeline, "translate_segments", side_effect=translated):
+            result = pipeline.run_pipeline(
+                source=str(video),
+                subtitle_path=srt,
+                prefer_attached_subtitle=True,
+                translate_srt_only=True,
+                enable_dubbing=False,
+                export_profile={"name": "tiktok_9_16", "width": 360, "height": 640, "fit_mode": "crop"},
+                encoder="libx264",
+                output_dir=output,
+                progress_callback=lambda message, _percent: progress_messages.append(message),
+            )
+        info = probe_media(result)
+        assert (info.width, info.height) == (360, 640)
+        assert not info.has_audio
+        assert abs(info.duration - 1.2) <= 0.15
+        assert any("upscale source pixels" in message for message in progress_messages)
+    print("✓ test_short_landscape_srt_clip_exports_portrait_without_audio: PASSED")
 
 
 def test_pipeline_job_returns_typed_terminal_statuses():
@@ -478,6 +528,7 @@ if __name__ == "__main__":
     test_srt_parser_handles_utf8_and_rejects_invalid_timing()
     test_segment_timeline_is_clamped_and_dubbing_delay_tracks_captions()
     test_pipeline_uses_attached_srt_without_whisper()
+    test_short_landscape_srt_clip_exports_portrait_without_audio()
     test_pipeline_job_returns_typed_terminal_statuses()
     test_transcription_honors_cancellation_between_segments()
     test_benchmark_parser_extracts_stage_and_recovery_metrics()

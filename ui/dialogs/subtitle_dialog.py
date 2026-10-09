@@ -42,6 +42,8 @@ class SubtitlePreviewDialog(QDialog):
 
         self.settings = dict(current_settings or {})
         self.result_settings = dict(self.settings)
+        self.output_profile_name = str(self.settings.get("export_profile_name", "original"))
+        self.export_fit_mode = str(self.settings.get("export_fit_mode", "crop"))
 
         self.border_style = int(self.settings.get("border_style", 3))
         self.text_color = str(self.settings.get("text_color", "#FFE600"))
@@ -408,6 +410,12 @@ class SubtitlePreviewDialog(QDialog):
         self.cbo_aspect.currentIndexChanged.connect(self.on_aspect_changed)
         h_tb.addWidget(self.cbo_aspect)
 
+        self.chk_safe_area = QCheckBox("Show TikTok safe area")
+        self.chk_safe_area.setChecked(self.output_profile_name == "tiktok_9_16")
+        self.chk_safe_area.setToolTip("Visual guide only; TikTok controls vary by device and caption layout.")
+        self.chk_safe_area.toggled.connect(self.canvas_safe_area_changed)
+        h_tb.addWidget(self.chk_safe_area)
+
         self.btn_pick_img = QPushButton("🖼️ Load Image Frame...")
         self.btn_pick_img.setFixedHeight(28)
         self.btn_pick_img.setStyleSheet("""
@@ -474,6 +482,10 @@ class SubtitlePreviewDialog(QDialog):
         self.text_color = str(self.settings.get("text_color", "#FFE600"))
         self.bg_color = str(self.settings.get("bg_color", "#000000"))
         self.update_color_buttons()
+        self.canvas.set_fit_mode(self.export_fit_mode)
+        self.canvas.set_safe_area_visible(self.chk_safe_area.isChecked())
+        if self.output_profile_name == "tiktok_9_16":
+            self.cbo_aspect.setCurrentIndex(0)
 
         # 2. Inspect video metadata and load 1st frame
         if self.current_video_path and Path(self.current_video_path).is_file():
@@ -486,10 +498,12 @@ class SubtitlePreviewDialog(QDialog):
             self.slider_timeline.setRange(0, max(10, max_steps))
             self.slider_timeline.setValue(min(10, max_steps))
 
-            if self.video_aspect == "16:9":
-                self.cbo_aspect.setCurrentIndex(1)
-            else:
+            if self.output_profile_name == "tiktok_9_16":
                 self.cbo_aspect.setCurrentIndex(0)
+            else:
+                self.cbo_aspect.setCurrentIndex(1 if self.video_aspect == "16:9" else 0)
+            self.canvas.set_fit_mode(self.export_fit_mode)
+            self.canvas.set_safe_area_visible(self.chk_safe_area.isChecked())
 
             self.load_frame_at(1.0)
         else:
@@ -518,7 +532,9 @@ class SubtitlePreviewDialog(QDialog):
                 pix = QPixmap(frame_path)
                 if not pix.isNull():
                     self.canvas.set_background_pixmap(pix)
-                    if pix.width() > pix.height():
+                    if self.output_profile_name == "tiktok_9_16":
+                        self.cbo_aspect.setCurrentIndex(0)
+                    elif pix.width() > pix.height():
                         self.cbo_aspect.setCurrentIndex(1)
                     else:
                         self.cbo_aspect.setCurrentIndex(0)
@@ -579,6 +595,9 @@ class SubtitlePreviewDialog(QDialog):
     def on_aspect_changed(self):
         aspect = self.cbo_aspect.currentData() or "9:16"
         self.canvas.set_aspect_ratio(aspect)
+
+    def canvas_safe_area_changed(self, visible: bool):
+        self.canvas.set_safe_area_visible(visible)
 
     def on_canvas_margin_v_changed(self, val: int):
         self.slider_margin_v.blockSignals(True)
@@ -739,6 +758,9 @@ class SubtitlePreviewDialog(QDialog):
             "sub_style": self.cbo_style_preset.currentText(),
             "border_style": self.border_style,
             "text_color": self.text_color,
-            "bg_color": self.bg_color
+            "bg_color": self.bg_color,
+            "export_profile_name": self.output_profile_name,
+            "export_fit_mode": self.export_fit_mode,
+            "show_safe_area": self.chk_safe_area.isChecked(),
         }
         self.accept()

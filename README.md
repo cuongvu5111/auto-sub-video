@@ -80,6 +80,9 @@ LLM_API_KEY=your_api_key_here
 * Dubbing delay shifts the translated subtitle and voice together. Segments that fall outside the video are clipped or omitted with a warning.
 * Temporary job files are isolated and removed after each job. Set `KEEP_INTERMEDIATES=true` in `.env` to retain them for debugging.
 * Existing outputs are preserved. A new render receives a numbered filename when the requested name already exists, and is published only after stream and duration validation.
+* Choose **TikTok Portrait 9:16 (1080×1920)** in Export to convert landscape or square sources for vertical publishing. **Crop to fill** trims the sides/top as needed; **Fit with black bars** preserves the complete frame. **Original size** remains the default.
+* The pipeline warns when a portrait profile must upscale the source. A larger output frame does not create source detail; choose contain mode or keep the original profile when preserving sharpness matters.
+* The subtitle preview can show a TikTok safe-area guide when the portrait profile is active. It is only a visual guide because TikTok controls vary by device and caption layout; it is never burned into the output.
 * Stop requests cancel active FFmpeg work and are checked between network and media operations. A provider request currently in flight can take up to its configured timeout to return.
 
 **4. Launch the application**

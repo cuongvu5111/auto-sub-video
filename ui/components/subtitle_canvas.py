@@ -26,6 +26,8 @@ class SubtitlePreviewCanvas(QWidget):
         self.setMouseTracking(True)
 
         self.aspect_ratio: str = "9:16"
+        self.fit_mode: str = "crop"
+        self.show_safe_area: bool = False
         self.bg_pixmap: Optional[QPixmap] = None
 
         # Subtitle styling attributes
@@ -50,6 +52,14 @@ class SubtitlePreviewCanvas(QWidget):
 
     def set_aspect_ratio(self, ratio_str: str):
         self.aspect_ratio = ratio_str
+        self.update()
+
+    def set_fit_mode(self, fit_mode: str):
+        self.fit_mode = fit_mode if fit_mode in {"crop", "contain"} else "crop"
+        self.update()
+
+    def set_safe_area_visible(self, visible: bool):
+        self.show_safe_area = bool(visible)
         self.update()
 
     def set_background_pixmap(self, pixmap: Optional[QPixmap]):
@@ -120,14 +130,17 @@ class SubtitlePreviewCanvas(QWidget):
         p.setClipPath(clip_path)
 
         if self.bg_pixmap and not self.bg_pixmap.isNull():
-            scaled_bg = self.bg_pixmap.scaled(
-                int(canvas_w), int(canvas_h),
-                Qt.KeepAspectRatioByExpanding,
-                Qt.SmoothTransformation
-            )
-            crop_x = (scaled_bg.width() - int(canvas_w)) // 2
-            crop_y = (scaled_bg.height() - int(canvas_h)) // 2
-            p.drawPixmap(int(canvas_x), int(canvas_y), scaled_bg, crop_x, crop_y, int(canvas_w), int(canvas_h))
+            scaling = Qt.KeepAspectRatio if self.fit_mode == "contain" else Qt.KeepAspectRatioByExpanding
+            scaled_bg = self.bg_pixmap.scaled(int(canvas_w), int(canvas_h), scaling, Qt.SmoothTransformation)
+            if self.fit_mode == "contain":
+                p.fillRect(canvas_rect, QColor(0, 0, 0))
+                draw_x = int(canvas_x + (canvas_w - scaled_bg.width()) / 2)
+                draw_y = int(canvas_y + (canvas_h - scaled_bg.height()) / 2)
+                p.drawPixmap(draw_x, draw_y, scaled_bg)
+            else:
+                crop_x = (scaled_bg.width() - int(canvas_w)) // 2
+                crop_y = (scaled_bg.height() - int(canvas_h)) // 2
+                p.drawPixmap(int(canvas_x), int(canvas_y), scaled_bg, crop_x, crop_y, int(canvas_w), int(canvas_h))
         else:
             grad = QLinearGradient(canvas_rect.topLeft(), canvas_rect.bottomRight())
             grad.setColorAt(0.0, QColor(15, 23, 42))
@@ -142,6 +155,18 @@ class SubtitlePreviewCanvas(QWidget):
             p.setFont(QFont("Segoe UI", 9))
             p.setPen(QColor(148, 163, 184, 80))
             p.drawText(QRectF(canvas_x, canvas_y + canvas_h * 0.42 + 22, canvas_w, 20), Qt.AlignCenter, f"{int(ref_w)} x {int(ref_h)}")
+
+        # The guide is intentionally an overlay only; it never changes rendered pixels.
+        if self.show_safe_area and is_vertical:
+            safe_rect = canvas_rect.adjusted(canvas_w * 0.08, canvas_h * 0.10, -canvas_w * 0.16, -canvas_h * 0.22)
+            shade = QColor(239, 68, 68, 36)
+            p.fillRect(QRectF(canvas_rect.left(), canvas_rect.top(), canvas_w, safe_rect.top() - canvas_rect.top()), shade)
+            p.fillRect(QRectF(canvas_rect.left(), safe_rect.bottom(), canvas_w, canvas_rect.bottom() - safe_rect.bottom()), shade)
+            p.fillRect(QRectF(canvas_rect.left(), safe_rect.top(), safe_rect.left() - canvas_rect.left(), safe_rect.height()), shade)
+            p.fillRect(QRectF(safe_rect.right(), safe_rect.top(), canvas_rect.right() - safe_rect.right(), safe_rect.height()), shade)
+            p.setPen(QPen(QColor(34, 197, 94, 220), 1.4, Qt.DashLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(safe_rect)
 
         # 4. Render Subtitle and Hardsub Cover Box (1:1 chuẩn xác theo FFmpeg LibASS)
         scale_h = canvas_h / ref_h

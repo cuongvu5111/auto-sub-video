@@ -20,6 +20,7 @@ root_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root_dir))
 
 from core.audio_mixer import format_ass_timestamp, generate_ass_file, hex_to_ass_color
+from core.video_profiles import ass_play_resolution, resolve_video_export_profile
 
 
 def test_ass_timestamp_formatting():
@@ -323,6 +324,7 @@ def test_short_source_audio_keeps_full_video_and_late_dub_after_render():
             source_video, mixed_audio, output_video,
             ass_subtitle_path=subtitle_file,
             encoder="libx264",
+            export_profile={"name": "tiktok_9_16", "width": 360, "height": 640, "fit_mode": "crop"},
         )
         second_output = render_final_video(source_video, mixed_audio, output_video, encoder="libx264")
 
@@ -332,11 +334,67 @@ def test_short_source_audio_keeps_full_video_and_late_dub_after_render():
             assert abs(float(container.duration / av.time_base) - 1.2) <= 0.15
             assert len(container.streams.video) == 1
             assert len(container.streams.audio) == 1
+            assert (container.streams.video[0].width, container.streams.video[0].height) == (360, 640)
         rendered_audio = AudioSegment.from_file(first_output, format="mp4")
         assert len(rendered_audio) >= 1150
         assert rendered_audio[950:1100].rms > 0, "Late dubbed audio disappeared during final render"
 
     print("✓ test_short_source_audio_keeps_full_video_and_late_dub_after_render: PASSED")
+
+
+def test_portrait_export_profile_renders_requested_geometry():
+    """A landscape source should crop or contain into portrait output without losing audio."""
+    import av
+    from core.audio_extractor import find_ffmpeg
+    from core.audio_mixer import render_final_video
+
+    ffmpeg_bin = find_ffmpeg()
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    with tempfile.TemporaryDirectory(prefix="portrait_profile_", dir=str(root_dir / "temp")) as tmp:
+        temp_dir = Path(tmp)
+        source = temp_dir / "landscape.mp4"
+        subprocess.run(
+            [ffmpeg_bin, "-y", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=24:duration=1",
+             "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:v", "libx264",
+             "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(source)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, creationflags=creationflags
+        )
+        subtitle = generate_ass_file(
+            [{"start": 0.1, "end": 0.9, "translated_text": "Portrait profile subtitle"}],
+            temp_dir / "portrait.ass",
+            play_res_x=720,
+            play_res_y=1280,
+        )
+        for fit_mode in ("crop", "contain"):
+            output = render_final_video(
+                source, None, temp_dir / f"{fit_mode}.mp4", ass_subtitle_path=subtitle, encoder="libx264",
+                export_profile={"name": "tiktok_9_16", "width": 360, "height": 640, "fit_mode": fit_mode},
+            )
+            with av.open(str(output)) as container:
+                video = container.streams.video[0]
+                assert (video.width, video.height) == (360, 640)
+                assert len(container.streams.audio) == 1
+                assert video.codec_context.name == "h264"
+                assert container.streams.audio[0].codec_context.name == "aac"
+                assert sum(1 for _ in container.decode(video=0)) == 24
+            with av.open(str(output)) as container:
+                assert sum(1 for _ in container.decode(audio=0)) > 0
+
+    print("✓ test_portrait_export_profile_renders_requested_geometry: PASSED")
+
+
+def test_video_profile_validation_and_ass_play_resolution():
+    assert resolve_video_export_profile(None).name == "original"
+    assert resolve_video_export_profile({"name": "tiktok_9_16"}).width == 1080
+    try:
+        resolve_video_export_profile({"name": "tiktok_9_16", "width": 640, "height": 1280})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("A non-9:16 profile should be rejected")
+    assert ass_play_resolution(1080, 1920) == (720, 1280)
+    assert ass_play_resolution(1920, 1080) == (1280, 720)
+    print("✓ test_video_profile_validation_and_ass_play_resolution: PASSED")
 
 
 if __name__ == "__main__":
@@ -352,5 +410,7 @@ if __name__ == "__main__":
     test_audio_mix_pads_short_background_to_video_duration()
     test_chunked_audio_mix_preserves_boundary_timing_and_source_fallback()
     test_short_source_audio_keeps_full_video_and_late_dub_after_render()
+    test_portrait_export_profile_renders_requested_geometry()
+    test_video_profile_validation_and_ass_play_resolution()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 6 ĐÃ VƯỢT QUA ===")
 
