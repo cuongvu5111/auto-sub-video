@@ -229,12 +229,15 @@ async def synthesize_speech_async(
     max_retries: int = 3,
     request_timeout: float = 20.0,
     total_timeout: float = 60.0,
-    cancel_check: Optional[Callable[[], bool]] = None
+    cancel_check: Optional[Callable[[], bool]] = None,
+    rate: Optional[str] = None,
+    speech_rate: Optional[float] = None,
 ) -> bool:
     """
     Hàm bất đồng bộ gọi Microsoft Edge TTS tạo giọng đọc tiếng Việt.
     Có cơ chế tự sửa từ ngữ nhạy cảm, đa dạng hóa biến thể dấu câu,
-    luân chuyển giọng đọc Nam/Nữ và exponential backoff khi gặp NoAudioReceived/RateLimit.
+    hỗ trợ tinh chỉnh tốc độ đọc (speech_rate), luân chuyển giọng đọc Nam/Nữ
+    và exponential backoff khi gặp NoAudioReceived/RateLimit.
     Trả về True nếu thành công, False nếu thất bại.
     """
     try:
@@ -280,6 +283,14 @@ async def synthesize_speech_async(
             await asyncio.wait({task}, timeout=wait_for)
         return await task
 
+    if speech_rate is not None:
+        pct = int(round((float(speech_rate) - 1.0) * 100))
+        rate_str = f"+{pct}%" if pct >= 0 else f"{pct}%"
+    elif rate:
+        rate_str = rate
+    else:
+        rate_str = "+0%"
+
     for attempt in range(max_retries):
         for v in voices_to_try:
             for cand in candidate_texts:
@@ -290,7 +301,10 @@ async def synthesize_speech_async(
                     return False
                 try:
                     out_path.unlink(missing_ok=True)
-                    communicate = edge_tts.Communicate(cand, v)
+                    if rate_str and rate_str != "+0%":
+                        communicate = edge_tts.Communicate(cand, v, rate=rate_str)
+                    else:
+                        communicate = edge_tts.Communicate(cand, v)
                     await save_with_controls(communicate, remaining)
                     if out_path.exists() and out_path.stat().st_size > 0:
                         return True
@@ -315,6 +329,7 @@ def adjust_audio_speed(
     target_duration: float,
     min_speed: float = 0.85,
     max_speed: float = 1.30,
+    base_speed: float = 1.0,
     cancel_check: Optional[Callable[[], bool]] = None,
     timing_callback: Optional[Callable[[str, float], None]] = None,
 ) -> Path:
@@ -327,6 +342,7 @@ def adjust_audio_speed(
         target_duration: Thời lượng mong muốn (giây).
         min_speed: Giới hạn làm chậm tối đa (tránh giọng bị rề rà).
         max_speed: Giới hạn tăng tốc tối đa (tránh giọng bị như chipmunk).
+        base_speed: Tốc độ đọc cơ sở do người dùng chọn (mặc định 1.0x).
 
     Returns:
         Path: Đường dẫn file audio đã qua căn chỉnh tốc độ.
@@ -363,8 +379,10 @@ def adjust_audio_speed(
 
     # Calculate tempo using audible content after trimming edge silence.
     raw_factor = content_duration / target_duration
-    # Kẹp giá trị trong dải an toàn để giữ nguyên độ tự nhiên của giọng đọc
-    speed_factor = max(min_speed, min(max_speed, raw_factor))
+    # Khi người dùng chọn tốc độ đọc nhanh (base_speed >= 1.0), không làm chậm giọng xuống dưới 1.0
+    eff_min = max(min_speed, 1.0) if base_speed >= 1.0 else min_speed
+    eff_max = max(max_speed, base_speed * 1.25)
+    speed_factor = max(eff_min, min(eff_max, raw_factor))
 
     # Nếu tốc độ chênh lệch rất nhỏ (dưới 3%), giữ nguyên file không cần re-encode
     if abs(speed_factor - 1.0) < 0.03 and not has_trim:
@@ -418,7 +436,8 @@ def process_dubbing_segments(
     voice: Optional[str] = None,
     output_dir: Optional[Path] = None,
     progress_callback: Optional[Callable[[str, float], None]] = None,
-    cancel_check: Optional[Callable[[], bool]] = None
+    cancel_check: Optional[Callable[[], bool]] = None,
+    speech_rate: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Run a synchronous TTS batch while reusing one event loop for all cues."""
     if not segments:
@@ -433,6 +452,7 @@ def process_dubbing_segments(
             progress_callback=progress_callback,
             cancel_check=cancel_check,
             tts_loop=tts_loop,
+            speech_rate=speech_rate,
         )
     finally:
         try:
@@ -448,6 +468,7 @@ def _process_dubbing_segments(
     progress_callback: Optional[Callable[[str, float], None]],
     cancel_check: Optional[Callable[[], bool]],
     tts_loop: asyncio.AbstractEventLoop,
+    speech_rate: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """
     Generate TTS audio with bounded concurrency, then sync and validate in source order.
@@ -466,6 +487,7 @@ def _process_dubbing_segments(
         return []
 
     target_voice = voice or Config.DEFAULT_VOICE
+    target_speech_rate = speech_rate if speech_rate is not None else getattr(Config, "DEFAULT_SPEECH_SPEED", 1.15)
     target_dir = output_dir or (Config.TEMP_DIR / "dubbing_segments")
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -556,6 +578,7 @@ def _process_dubbing_segments(
                         plan["text"],
                         plan["raw_mp3"],
                         target_voice,
+                        speech_rate=target_speech_rate,
                         request_timeout=Config.TTS_REQUEST_TIMEOUT,
                         total_timeout=Config.TTS_SEGMENT_TIMEOUT,
                         cancel_check=cancel_check,
@@ -624,6 +647,7 @@ def _process_dubbing_segments(
                 raw_mp3,
                 synced_mp3,
                 target_duration,
+                base_speed=target_speech_rate,
                 cancel_check=cancel_check,
                 timing_callback=record_timing,
             )

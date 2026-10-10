@@ -124,6 +124,7 @@ def _run_pipeline(
     translate_srt_only: bool = False,
     delay_offset: float = 0.0,
     export_profile: Optional[Dict[str, Any]] = None,
+    speech_rate: Optional[float] = None,
 ) -> Path:
     """
     Điều phối toàn bộ luồng xử lý tự động từ Video nguồn (Link/Tệp) ra Video thành phẩm.
@@ -274,7 +275,8 @@ def _run_pipeline(
             voice=voice,
             output_dir=workspace_dir / "dubbing_segments",
             progress_callback=lambda m, p: report(f"Step 5/6: {m}", 68.0 + p * 0.17),
-            cancel_check=cancel_check
+            cancel_check=cancel_check,
+            speech_rate=speech_rate,
         )
     else:
         report("Step 5/6: AI voice dubbing disabled. Preserving original video audio...", 75.0)
@@ -403,6 +405,7 @@ def run_pipeline(
     translate_srt_only: bool = False,
     delay_offset: float = 0.0,
     export_profile: Optional[Dict[str, Any]] = None,
+    speech_rate: Optional[float] = None,
 ) -> Path:
     """Run one job in an isolated workspace and clean it up on every exit path."""
     workspace_dir = create_job_workspace()
@@ -428,6 +431,7 @@ def run_pipeline(
             translate_srt_only=translate_srt_only,
             delay_offset=delay_offset,
             export_profile=export_profile,
+            speech_rate=speech_rate,
         )
     finally:
         if not Config.KEEP_INTERMEDIATES:
@@ -483,6 +487,7 @@ def main():
     parser.add_argument("--source", "-s", required=True, help="URL video TikTok/Douyin hoặc đường dẫn tệp MP4 cục bộ")
     parser.add_argument("--voice", "-v", default=Config.DEFAULT_VOICE, help="Giọng lồng tiếng (NamMinh / HoaiMy)")
     parser.add_argument("--ducking", "-d", type=float, default=Config.DEFAULT_DUCKING_VOLUME, help="Âm lượng tiếng nền (mặc định 0.10)")
+    parser.add_argument("--speed", type=float, default=getattr(Config, "DEFAULT_SPEECH_SPEED", 1.15), help="Tốc độ giọng đọc AI (mặc định 1.15x)")
     parser.add_argument("--no-sub", action="store_true", help="Không nung phụ đề vào video")
     parser.add_argument("--no-dub", action="store_true", help="Không lồng tiếng AI (giữ nguyên âm thanh gốc)")
     parser.add_argument("--output", "-o", default=str(Config.OUTPUT_DIR), help="Thư mục xuất video")
@@ -496,6 +501,7 @@ def main():
             ducking_volume=args.ducking,
             burn_subtitles=not args.no_sub,
             enable_dubbing=not args.no_dub,
+            speech_rate=args.speed,
             output_dir=Path(args.output)
         )
         print(f"\n✓ THÀNH CÔNG: {final_path}")

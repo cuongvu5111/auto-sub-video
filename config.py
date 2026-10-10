@@ -108,6 +108,7 @@ class Config:
 
     # Cấu hình lồng tiếng Text-to-Speech (edge-tts)
     DEFAULT_VOICE: str = os.getenv("DEFAULT_VOICE", "vi-VN-NamMinhNeural")
+    DEFAULT_SPEECH_SPEED: float = float(os.getenv("DEFAULT_SPEECH_SPEED", "1.15"))
 
     # Cấu hình âm lượng tiếng nền khi hòa âm (10% tiếng gốc)
     DEFAULT_DUCKING_VOLUME: float = float(os.getenv("DEFAULT_DUCKING_VOLUME", "0.10"))

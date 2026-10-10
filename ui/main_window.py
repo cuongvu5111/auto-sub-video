@@ -368,8 +368,8 @@ class MainWindow(QMainWindow):
             self.cbo_voice.addItem(label, voice_key)
         layout_tts.addWidget(self.cbo_voice, 1, 1)
 
-        # Row 2: Volume & Delay
-        self.lbl_vol_delay = QLabel("Volume & Delay:")
+        # Row 2: Speech Tuning (Ducking, Delay, Speed)
+        self.lbl_vol_delay = QLabel("Speech Tuning:")
         layout_tts.addWidget(self.lbl_vol_delay, 2, 0)
         h_tuning = QHBoxLayout()
         h_tuning.setSpacing(10)
@@ -377,23 +377,37 @@ class MainWindow(QMainWindow):
         self.lbl_ducking = QLabel("Ducking:")
         self.spn_ducking = QDoubleSpinBox()
         self.spn_ducking.setFixedHeight(32)
-        self.spn_ducking.setFixedWidth(85)
+        self.spn_ducking.setFixedWidth(75)
         self.spn_ducking.setRange(0.0, 1.0)
         self.spn_ducking.setSingleStep(0.02)
         self.spn_ducking.setValue(Config.DEFAULT_DUCKING_VOLUME)
+        self.spn_ducking.setToolTip("Background audio volume ducking level during dubbing dialogue")
 
-        self.lbl_delay = QLabel("Dubbing Delay:")
-        self.lbl_delay.setFixedWidth(90)
+        self.lbl_delay = QLabel("Delay:")
         self.spn_delay = QDoubleSpinBox()
         self.spn_delay.setFixedHeight(32)
-        self.spn_delay.setFixedWidth(85)
+        self.spn_delay.setFixedWidth(75)
         self.spn_delay.setRange(-2.0, 5.0)
         self.spn_delay.setValue(0.0)
+        self.spn_delay.setSuffix("s")
+        self.spn_delay.setToolTip("Shift dubbing start offset (in seconds)")
+
+        self.lbl_speed = QLabel("Speed:")
+        self.spn_speed = QDoubleSpinBox()
+        self.spn_speed.setFixedHeight(32)
+        self.spn_speed.setFixedWidth(80)
+        self.spn_speed.setRange(0.80, 1.60)
+        self.spn_speed.setSingleStep(0.05)
+        self.spn_speed.setValue(getattr(Config, "DEFAULT_SPEECH_SPEED", 1.15))
+        self.spn_speed.setSuffix("x")
+        self.spn_speed.setToolTip("AI speech speed / rate (1.15x recommended for shortform / TikTok videos)")
 
         h_tuning.addWidget(self.lbl_ducking)
         h_tuning.addWidget(self.spn_ducking)
         h_tuning.addWidget(self.lbl_delay)
         h_tuning.addWidget(self.spn_delay)
+        h_tuning.addWidget(self.lbl_speed)
+        h_tuning.addWidget(self.spn_speed)
         h_tuning.addStretch()
         layout_tts.addLayout(h_tuning, 2, 1)
 
@@ -1408,6 +1422,8 @@ class MainWindow(QMainWindow):
         self.lbl_clone.setEnabled(enabled)
         self.lbl_ducking.setEnabled(enabled)
         self.lbl_delay.setEnabled(enabled)
+        self.spn_speed.setEnabled(enabled)
+        self.lbl_speed.setEnabled(enabled)
 
         if enabled:
             self.lbl_dub_hint.setText("(AI voice will replace/duck original dialogue)")
@@ -1607,6 +1623,7 @@ class MainWindow(QMainWindow):
             "prefer_attached_subtitle": self.cbo_mode.currentIndex() == 0,
             "translate_srt_only": self.chk_only_srt.isChecked(),
             "delay_offset": self.spn_delay.value(),
+            "speech_speed": self.spn_speed.value(),
             "output_dir": Path(self.txt_output_dir.text()).resolve()
         }
 

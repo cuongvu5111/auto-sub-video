@@ -77,6 +77,7 @@ class DubbingWorker(QThread):
                         translate_srt_only=self.options.get("translate_srt_only", False),
                         delay_offset=self.options.get("delay_offset", 0.0),
                         export_profile=self.options.get("export_profile"),
+                        speech_rate=self.options.get("speech_speed", getattr(Config, "DEFAULT_SPEECH_SPEED", 1.15)),
                         progress_callback=progress_hook,
                         cancel_check=self._cancel_event.is_set
                     )

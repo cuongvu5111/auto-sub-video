@@ -326,12 +326,17 @@ def test_toggle_dubbing_ui():
     assert win.cbo_voice.isEnabled() is True
     assert win.spn_ducking.isEnabled() is True
 
+    assert hasattr(win, "spn_speed")
+    assert win.spn_speed.value() == 1.15
+    assert win.spn_speed.isEnabled() is True
+
     # 2. Tắt lồng tiếng: chuyển sang False
     win.chk_enable_dubbing.setChecked(False)
     assert win.chk_enable_dubbing.isChecked() is False
     assert win.cbo_voice.isEnabled() is False
     assert win.spn_ducking.isEnabled() is False
     assert win.spn_delay.isEnabled() is False
+    assert win.spn_speed.isEnabled() is False
     assert win.txt_clone.isEnabled() is False
     assert win.btn_browse_clone.isEnabled() is False
     assert "Preserves 100% original video audio" in win.lbl_dub_hint.text()
@@ -342,6 +347,7 @@ def test_toggle_dubbing_ui():
     assert win.cbo_voice.isEnabled() is True
     assert win.spn_ducking.isEnabled() is True
     assert win.spn_delay.isEnabled() is True
+    assert win.spn_speed.isEnabled() is True
     assert win.txt_clone.isEnabled() is False
     assert win.btn_browse_clone.isEnabled() is False
 

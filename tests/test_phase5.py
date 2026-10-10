@@ -135,7 +135,7 @@ def test_tts_failure_is_reported_and_marked():
             Path(path).write_bytes(b"fake-audio")
             return Path(path)
 
-        def sync_audio(source, output, duration, cancel_check=None, timing_callback=None):
+        def sync_audio(source, output, duration, *args, **kwargs):
             Path(output).write_bytes(b"fake-audio")
             return Path(output)
 
@@ -164,7 +164,7 @@ def test_tts_batch_reuses_one_event_loop():
     with tempfile.TemporaryDirectory(prefix="tts_loop_", dir=str(root_dir / "temp")) as tmp:
         output_dir = Path(tmp)
 
-        def sync_audio(source, output, duration, cancel_check=None, timing_callback=None):
+        def sync_audio(source, output, duration, *args, **kwargs):
             Path(output).write_bytes(b"fake-audio")
             return Path(output)
 
@@ -226,7 +226,7 @@ def test_tts_batch_uses_bounded_concurrency_and_preserves_order():
         active -= 1
         return True
 
-    def sync_audio(source, output, duration, cancel_check=None, timing_callback=None):
+    def sync_audio(source, output, duration, *args, **kwargs):
         Path(output).write_bytes(b"synced-audio")
         return Path(output)
 
@@ -362,6 +362,39 @@ def test_live_edge_tts():
         print(f"! test_live_edge_tts SKIPPED/WARNING (Có thể do mạng): {e}")
 
 
+def test_custom_speech_speed_configuration():
+    """Kiểm tra tuỳ chỉnh tốc độ đọc (speech_rate) chuyển đổi thành rate string và ngăn làm chậm giọng quá mức."""
+    from types import ModuleType
+    from unittest.mock import patch
+    import tempfile
+
+    captured_rate = []
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, rate="+0%", **kwargs):
+            captured_rate.append(rate)
+
+        async def save(self, path):
+            Path(path).write_bytes(b"test-audio-content")
+
+    fake_edge = ModuleType("edge_tts")
+    fake_edge.Communicate = FakeCommunicate
+
+    with tempfile.TemporaryDirectory(prefix="tts_speed_", dir=str(root_dir / "temp")) as tmp:
+        out_file = Path(tmp) / "speech_speed.mp3"
+        with patch.dict(sys.modules, {"edge_tts": fake_edge}):
+            success = asyncio.run(synthesize_speech_async(
+                "Đọc nhanh hơn nhé",
+                out_file,
+                "vi-VN-NamMinhNeural",
+                speech_rate=1.25,
+            ))
+            assert success is True
+            assert captured_rate == ["+25%"]
+
+    print("✓ test_custom_speech_speed_configuration: PASSED")
+
+
 if __name__ == "__main__":
     print("=== CHẠY KIỂM THỬ PHASE 5 ===")
     test_missing_file_duration()
@@ -373,5 +406,6 @@ if __name__ == "__main__":
     test_tts_batch_uses_bounded_concurrency_and_preserves_order()
     test_overlong_dubbing_is_preserved_and_overlap_is_reported()
     test_tts_rate_limit_retry_is_bounded_and_cancellable()
+    test_custom_speech_speed_configuration()
     test_live_edge_tts()
     print("=== TẤT CẢ TEST ĐƠN VỊ PHASE 5 ĐÃ VƯỢT QUA ===")
