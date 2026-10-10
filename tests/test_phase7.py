@@ -50,14 +50,17 @@ def test_worker_signals_and_button_recovery():
     worker = DubbingWorker(fake_tasks, {})
     
     finished_called = []
+    status_emitted = []
     def on_finished(success, total):
         finished_called.append((success, total))
         
     worker.sig_finished.connect(on_finished)
+    worker.sig_item_status.connect(lambda row, txt, col: status_emitted.append(txt))
     worker.run()  # Chạy trực tiếp phương thức run để kiểm tra khối try...finally
     
     assert len(finished_called) == 1, "sig_finished không được phát khi worker kết thúc hoặc gặp lỗi"
     assert finished_called[0] == (0, 1), f"Kết quả trả về không đúng: {finished_called[0]}"
+    assert not any("Config" in s for s in status_emitted), f"Lỗi NameError xuất hiện trong worker: {status_emitted}"
     print("✓ test_worker_signals_and_button_recovery: PASSED (sig_finished luôn phát dù video bị lỗi)")
 
 

@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 from PySide6.QtCore import QThread, Signal
 from pipeline import run_pipeline_job
 from core.job_result import JobStatus
+from config import Config
 
 
 class DubbingWorker(QThread):
