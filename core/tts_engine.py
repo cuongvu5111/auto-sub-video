@@ -258,10 +258,11 @@ async def synthesize_speech_async(
 
     # Tập các biến thể văn bản giúp vượt qua lỗi NoAudioReceived trên dịch vụ Edge-TTS tiếng Việt
     candidate_texts = [clean_text]
+    stripped = clean_text.rstrip(".!?… \t")
+    if stripped and stripped != clean_text:
+        candidate_texts.append(stripped)
     if not clean_text.endswith((".", "!", "?")):
         candidate_texts.append(f"{clean_text}.")
-    else:
-        candidate_texts.append(clean_text.rstrip(".!?"))
     candidate_texts.append(f'"{clean_text}"')
 
     loop = asyncio.get_running_loop()
@@ -291,30 +292,35 @@ async def synthesize_speech_async(
     else:
         rate_str = "+0%"
 
+    rates_to_try = [rate_str]
+    if rate_str != "+0%":
+        rates_to_try.append("+0%")
+
     for attempt in range(max_retries):
         for v in voices_to_try:
-            for cand in candidate_texts:
-                if cancel_check and cancel_check():
-                    raise InterruptedError("The TTS request was cancelled by the user.")
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    return False
-                try:
-                    out_path.unlink(missing_ok=True)
-                    if rate_str and rate_str != "+0%":
-                        communicate = edge_tts.Communicate(cand, v, rate=rate_str)
-                    else:
-                        communicate = edge_tts.Communicate(cand, v)
-                    await save_with_controls(communicate, remaining)
-                    if out_path.exists() and out_path.stat().st_size > 0:
-                        return True
-                except InterruptedError:
-                    raise
-                except Exception:
-                    out_path.unlink(missing_ok=True)
-                    # Chờ ngắn trước khi thử biến thể tiếp theo
-                    await asyncio.sleep(0.2)
-                    continue
+            for r in rates_to_try:
+                for cand in candidate_texts:
+                    if cancel_check and cancel_check():
+                        raise InterruptedError("The TTS request was cancelled by the user.")
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        return False
+                    try:
+                        out_path.unlink(missing_ok=True)
+                        if r and r != "+0%":
+                            communicate = edge_tts.Communicate(cand, v, rate=r)
+                        else:
+                            communicate = edge_tts.Communicate(cand, v)
+                        await save_with_controls(communicate, remaining)
+                        if out_path.exists() and out_path.stat().st_size > 0:
+                            return True
+                    except InterruptedError:
+                        raise
+                    except Exception:
+                        out_path.unlink(missing_ok=True)
+                        # Chờ ngắn trước khi thử biến thể tiếp theo
+                        await asyncio.sleep(0.2)
+                        continue
 
         # Nếu thất bại toàn bộ biến thể trong lượt thử này, backoff trước khi sang lượt kế tiếp
         if attempt < max_retries - 1:

@@ -11,7 +11,7 @@ faster-whisper>=1.0.3
 av<19
 
 # Giọng đọc AI tự nhiên chất lượng cao từ Microsoft Edge (miễn phí)
-edge-tts>=6.1.12
+edge-tts>=7.3.1
 
 # Xử lý cắt ghép, timeline và đo thời lượng âm thanh
 pydub>=0.25.1
